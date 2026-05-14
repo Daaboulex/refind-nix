@@ -1,13 +1,13 @@
 {
-  "package": "refind-theme-minimal",
+  "package": "refind",
   "upstream": {
-    "type": "sourceforge",
-    "source": "refind (rEFInd binary)",
-    "note": "Themes tracked via GitHub commit SHAs in themes/*.nix"
+    "type": "none"
   },
-  "packageFile": "themes/minimal.nix",
+  "packageFile": null,
   "hashes": [],
   "verify": {
-    "check": "theme"
+    "binary": null,
+    "args": null,
+    "check": "eval"
   }
 }

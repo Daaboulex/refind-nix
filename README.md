@@ -63,6 +63,28 @@ boot.loader.refind.theme = pkgs.mkRefindTheme {
 
 Security checks run automatically: PE binaries, oversized images, path traversal, symlinks, and unknown directives are all rejected at build time.
 
+## Multi-Boot
+
+Define manual boot entries for non-NixOS operating systems:
+
+```nix
+boot.loader.refind.extraEntries = [
+  {
+    name = "Windows";
+    loader = "\\EFI\\Microsoft\\Boot\\bootmgfw.efi";
+    ostype = "Windows";
+  }
+  {
+    name = "macOS";
+    loader = "\\EFI\\Apple\\Boot\\bootmgfw.efi";
+    ostype = "MacOS";
+    volume = "MacOS";
+  }
+];
+```
+
+Each entry supports: `name`, `loader`, `initrd`, `options`, `icon`, `volume`, `ostype`, `graphics`, `disabled`, and nested `subEntries`.
+
 ## Options
 
 | Option | Type | Default | Description |
@@ -80,6 +102,41 @@ Security checks run automatically: PE binaries, oversized images, path traversal
 | `textOnly` | bool | false | Text-only mode |
 | `extraConfig` | lines | "" | Raw config lines |
 | `additionalFiles` | attrsOf path | {} | Extra files for ESP |
+| `resolution` | str/null | null | Screen resolution (e.g. "1920x1080") |
+| `scanfor` | list of enum | [] | Boot entry types to scan for |
+| `dontScanDirs` | list of str | [EFI/nixos ...] | Dirs to exclude from scanning |
+| `useGraphicsFor` | list of enum | [] | OS types to boot in graphics mode |
+| `enableMouse` | bool | false | Enable mouse support |
+| `enableTouch` | bool | false | Enable touchscreen support |
+| `graceful` | bool | false | Don't fail if ESP not mounted |
+| `extraEntries` | list of submodule | [] | Manual boot entries (Windows, macOS, etc.) |
+
+<!-- BEGIN generated:options -->
+<!-- END generated:options -->
+
+## Security
+
+Theme files are validated at build time with 12 security checks:
+
+1. PE binary detection (MZ magic bytes)
+2. EFI file extension rejection (case-insensitive)
+3. Image file size limit (5 MB)
+4. Icons directory extension whitelist (.png, .bmp only)
+5. Symlink rejection
+6. Theme.conf directive whitelist
+7. Include directive rejection
+8. Path traversal detection (forward and backslash)
+9. Absolute path rejection in directive values
+10. Image dimension limits (8192x8192 for PNG/BMP)
+11. Fonts directory extension whitelist (.png only)
+12. JPEG/ICNS rejection (use PNG instead)
+
+Runtime validation runs during `nixos-rebuild switch` for themes not built with `mkRefindTheme`. The `extraConfig` option bypasses all validation — use only for directives not covered by typed options.
+
+## Known Issues
+
+- **rEFInd 0.14.2 `showtools` regression**: Duplicate tool entries appear. Affects all distributions. Workaround: downgrade to 0.14.0.2 or use `hideUI` to reduce clutter.
+- **ESP sizing**: Each NixOS generation copies kernel (~12 MB) + initrd (25-200 MB) to the ESP. With NVIDIA drivers (initrd ~192 MB), a 500 MB ESP holds only 2-3 generations. Set `maxGenerations` accordingly.
 
 <!-- BEGIN generated:options -->
 <!-- END generated:options -->

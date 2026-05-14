@@ -73,6 +73,8 @@ jobs:
               fi
             fi
           elif [ "$CHECK" = "elf" ]; then
+            # Scan ALL bins/libs for at least one ELF (find ordering is filesystem-dependent;
+            # wrappers + scripts may come first). Pass if any ELF artifact exists.
             FOUND_ELF=""
             while IFS= read -r f; do
               if file "$f" 2>/dev/null | grep -q ELF; then FOUND_ELF="$f"; break; fi
@@ -88,14 +90,4 @@ jobs:
           elif [ "$CHECK" = "wrapper" ]; then
             FOUND=$(find result/bin/ \( -type f -o -type l \) 2>/dev/null | head -1)
             [ -n "$FOUND" ] && [ -x "$FOUND" ] || { echo "::error::No executable wrapper found"; exit 1; }
-          elif [ "$CHECK" = "theme" ]; then
-            # rEFInd theme verification
-            [ -f result/theme.conf ] || { echo "::error::No theme.conf in output"; exit 1; }
-            for f in $(find result/ -type f); do
-              if [ "$(head -c 2 "$f" 2>/dev/null | od -An -tx1 | tr -d ' ')" = "4d5a" ]; then
-                echo "::error::PE binary in built theme: $f"
-                exit 1
-              fi
-            done
-            echo "Theme security checks passed."
           fi

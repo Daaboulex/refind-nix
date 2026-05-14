@@ -22,12 +22,8 @@ Please do **not** open public issues for security problems.
 
 ## Scope
 
-This repository is a NixOS rEFInd bootloader module with theme packaging. Security scope covers:
+This repository is a Nix packaging wrapper. Security issues within the upstream software itself should be reported to the upstream project. This repo's security scope covers:
 
-- **Theme validation** — PE binary injection, LogoFAIL-class oversized images, path traversal, symlinks
-- **ESP write safety** — atomic writes, orphan cleanup, crash resilience
-- **Build-time supply-chain** — unpinned inputs, missing hash verification
-- **Installer privilege** — runs as root via boot.loader.external; must not expose escalation paths
-- **Misconfigured CI secrets or tokens**
-
-Upstream rEFInd vulnerabilities should be reported to the rEFInd project directly.
+- Build-time supply-chain issues (unpinned inputs, missing hash verification)
+- Misconfigured CI secrets or tokens
+- Malicious overlay or flake output surface

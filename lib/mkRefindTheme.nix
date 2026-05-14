@@ -26,8 +26,8 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
 
-    srcDir="${themeDir}"
-    ${lib.optionalString (variant != null) ''srcDir="${variant}"''}
+    srcDir=${lib.escapeShellArg themeDir}
+    ${lib.optionalString (variant != null) "srcDir=${lib.escapeShellArg variant}"}
 
     if [ ! -f "$srcDir/theme.conf" ]; then
       echo "ERROR: theme.conf not found in $srcDir" >&2
@@ -48,15 +48,15 @@ stdenvNoCC.mkDerivation {
 
   fixupPhase = ''
     # SECURITY 1: reject PE binaries (MZ magic 0x4d5a)
-    find $out -type f | while IFS= read -r f; do
+    while IFS= read -r f; do
       if [ "$(head -c 2 "$f" 2>/dev/null | od -An -tx1 | tr -d ' ')" = "4d5a" ]; then
         echo "SECURITY: PE binary detected: $f" >&2
         exit 1
       fi
-    done
+    done < <(find $out -type f)
 
-    # SECURITY 2: reject .efi extensions
-    if find $out \( -name '*.efi' -o -name '*.EFI' \) | grep -q .; then
+    # SECURITY 2: reject .efi extensions (case-insensitive for FAT32)
+    if find $out -iname '*.efi' | grep -q .; then
       echo "SECURITY: EFI file extension in theme" >&2
       exit 1
     fi
@@ -95,9 +95,73 @@ stdenvNoCC.mkDerivation {
       exit 1
     fi
 
-    # SECURITY 8: reject path traversal in directive values
-    if grep -E '\.\.\/' "$out/theme.conf" | grep -q .; then
+    # SECURITY 8: reject path traversal in directive values (forward and backslash)
+    if grep -E '\.\.[\\/]' "$out/theme.conf" | grep -q .; then
       echo "SECURITY: path traversal in directive value" >&2
+      exit 1
+    fi
+
+    # SECURITY 9: reject absolute paths in directive values (ESP-relative escape)
+    if grep -E '^\s*(banner|icons_dir|selection_big|selection_small|font)\s+/' "$out/theme.conf" | grep -q .; then
+      echo "SECURITY: absolute path in directive value" >&2
+      exit 1
+    fi
+
+    # SECURITY 10: reject images with excessive dimensions (integer overflow mitigation)
+    # rEFInd's LodePNG/load_bmp.c have unprotected width*height multiplication.
+    # Cap at 8192x8192 to prevent integer overflow in 32-bit allocation math.
+    while IFS= read -r img; do
+      w=$(od -An -N4 -j16 -tu4 --endian=big "$img" 2>/dev/null | tr -d ' ')
+      h=$(od -An -N4 -j20 -tu4 --endian=big "$img" 2>/dev/null | tr -d ' ')
+      if [ -z "$w" ] || [ -z "$h" ]; then
+        echo "SECURITY: malformed PNG (cannot read dimensions): $img" >&2
+        exit 1
+      fi
+      if [ "$w" -gt 8192 ] || [ "$h" -gt 8192 ]; then
+        echo "SECURITY: PNG dimensions exceed 8192px: $img ($w x $h)" >&2
+        exit 1
+      fi
+    done < <(find $out \( -name '*.png' -o -name '*.PNG' \) -type f)
+    while IFS= read -r img; do
+      # Read DIB header size to determine field widths
+      hdr_size=$(od -An -N4 -j14 -tu4 --endian=little "$img" 2>/dev/null | tr -d ' ')
+      if [ -z "$hdr_size" ]; then
+        echo "SECURITY: malformed BMP (cannot read header): $img" >&2
+        exit 1
+      fi
+      if [ "$hdr_size" -eq 12 ]; then
+        # BITMAPCOREHEADER: 16-bit width at offset 18, height at offset 20
+        w=$(od -An -N2 -j18 -tu2 --endian=little "$img" 2>/dev/null | tr -d ' ')
+        h=$(od -An -N2 -j20 -tu2 --endian=little "$img" 2>/dev/null | tr -d ' ')
+      else
+        # BITMAPINFOHEADER or later: 32-bit fields
+        w=$(od -An -N4 -j18 -tu4 --endian=little "$img" 2>/dev/null | tr -d ' ')
+        h=$(od -An -N4 -j22 -tu4 --endian=little "$img" 2>/dev/null | tr -d ' ')
+        if [ -n "$h" ] && [ "$h" -gt 2147483647 ]; then
+          h=$((4294967296 - h))
+        fi
+      fi
+      if [ -z "$w" ] || [ -z "$h" ]; then
+        echo "SECURITY: malformed BMP (cannot read dimensions): $img" >&2
+        exit 1
+      fi
+      if [ "$w" -gt 8192 ] || [ "$h" -gt 8192 ]; then
+        echo "SECURITY: BMP dimensions exceed 8192px: $img ($w x $h)" >&2
+        exit 1
+      fi
+    done < <(find $out \( -name '*.bmp' -o -name '*.BMP' \) -type f)
+
+    # SECURITY 11: fonts/ extension whitelist — only .png allowed
+    if [ -d "$out/fonts" ]; then
+      if find "$out/fonts" -type f ! -name '*.png' | grep -q .; then
+        echo "SECURITY: non-PNG file in fonts/" >&2
+        exit 1
+      fi
+    fi
+
+    # SECURITY 12: reject JPEG/ICNS (no dimension validation — use PNG instead)
+    if find $out \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.icns' \) -type f | grep -q .; then
+      echo "SECURITY: JPEG/ICNS not allowed in themes (convert to PNG)" >&2
       exit 1
     fi
   '';
