@@ -20,23 +20,44 @@ Declarative rEFInd bootloader for NixOS — typed options, first-class theming, 
 
 ## Features
 
-- **Typed NixOS options** for `refind.conf` directives (no raw `extraConfig` needed)
+- **22 typed NixOS options** for `refind.conf` directives (no raw `extraConfig` needed)
 - **First-class theme support** — themes as Nix store derivations with `mkRefindTheme`
-- **Security validation** — PE binary detection, image size limits, directive whitelist, symlink rejection
+- **12 security checks** — PE binary detection, image dimension limits, directive whitelist, symlink rejection, and more
+- **Typed multi-boot entries** — `extraEntries` submodule for Windows, macOS, Linux
 - **Bug fixes** — nixpkgs #452075 (efiRemovable path), #453812 (default_selection override)
-- **Safe ESP management** — tmp→fsync→rename writes, orphan file cleanup, syncfs
-- **Uses `boot.loader.external`** — the official NixOS external bootloader hook
+- **Safe ESP management** — fsync + directory fsync, atomic writes, orphan file cleanup, file locking
+- **initrdSecrets support** — bootspec RFC compliant, LUKS key injection into initrd
+- **15 flake checks** — eval tests, assertion tests, security unit tests
 
 ## Quick Start
 
+### 1. Add the flake input
+
 ```nix
 # flake.nix
-inputs.refind-nix.url = "github:Daaboulex/refind-nix";
+inputs.refind-nix = {
+  url = "github:Daaboulex/refind-nix";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
 
-# configuration.nix
-{ inputs, ... }: {
+### 2. Import the module and overlay
+
+```nix
+# In your host configuration
+{ inputs, pkgs, ... }: {
   imports = [ inputs.refind-nix.nixosModules.default ];
   nixpkgs.overlays = [ inputs.refind-nix.overlays.default ];
+```
+
+### 3. Disable your current bootloader and enable rEFInd
+
+```nix
+  # Disable systemd-boot (required — rEFInd asserts no conflicts)
+  boot.loader.systemd-boot.enable = false;
+  # Or if using GRUB: boot.loader.grub.enable = false;
+
+  boot.loader.efi.canTouchEfiVariables = true;
 
   boot.loader.refind = {
     enable = true;
@@ -49,23 +70,22 @@ inputs.refind-nix.url = "github:Daaboulex/refind-nix";
 }
 ```
 
-## Custom Themes
+### Migration from systemd-boot
 
-Package any rEFInd theme with `mkRefindTheme`:
+Switching bootloaders is safe when done carefully:
 
-```nix
-boot.loader.refind.theme = pkgs.mkRefindTheme {
-  name = "my-theme";
-  src = fetchFromGitHub { owner = "..."; repo = "..."; rev = "..."; hash = "..."; };
-  description = "My custom rEFInd theme";
-};
-```
+1. **Build without activating first**: `nixos-rebuild build` — verifies the config evaluates and builds. Nothing changes on disk.
+2. **Check ESP space**: `df -h /boot` — ensure at least 100 MB free.
+3. **Keep a fallback**: your previous bootloader's EFI files are NOT deleted. rEFInd only writes to its own directory (`/EFI/refind/` or `/EFI/boot/`).
+4. **Firmware boot menu**: if rEFInd fails, use your firmware's boot menu (F12, DEL, or Option/Alt on Mac) to select the old bootloader entry.
+5. **Switch**: `sudo nixos-rebuild switch` — installs rEFInd and updates NVRAM.
+6. **Reboot and verify**.
 
-Security checks run automatically: PE binaries, oversized images, path traversal, symlinks, and unknown directives are all rejected at build time.
+**For Apple hardware**: set `efiInstallAsRemovable = true` — Apple firmware is unreliable with custom NVRAM entries. This installs to the firmware fallback path which always works.
 
 ## Multi-Boot
 
-Define manual boot entries for non-NixOS operating systems:
+rEFInd auto-discovers other operating systems on all drives. For explicit control, define manual boot entries:
 
 ```nix
 boot.loader.refind.extraEntries = [
@@ -85,6 +105,20 @@ boot.loader.refind.extraEntries = [
 
 Each entry supports: `name`, `loader`, `initrd`, `options`, `icon`, `volume`, `ostype`, `graphics`, `disabled`, and nested `subEntries`.
 
+## Custom Themes
+
+Package any rEFInd theme with `mkRefindTheme`:
+
+```nix
+boot.loader.refind.theme = pkgs.mkRefindTheme {
+  name = "my-theme";
+  src = fetchFromGitHub { owner = "..."; repo = "..."; rev = "..."; hash = "..."; };
+  description = "My custom rEFInd theme";
+};
+```
+
+12 security checks run automatically at build time. Themes using JPEG or ICNS images must convert to PNG.
+
 ## Options
 
 | Option | Type | Default | Description |
@@ -92,17 +126,15 @@ Each entry supports: `name`, `loader`, `initrd`, `options`, `icon`, `volume`, `o
 | `enable` | bool | false | Enable rEFInd boot manager |
 | `package` | package | pkgs.refind | rEFInd package |
 | `timeout` | int | 10 | Boot timeout in seconds |
-| `maxGenerations` | int/null | 50 | Max generations in menu |
+| `maxGenerations` | positive int/null | 50 | Max generations in menu (null = unlimited) |
 | `defaultSelection` | str/null | null | Default boot entry |
-| `efiInstallAsRemovable` | bool | !canTouchEfiVariables | Install to fallback EFI path |
+| `efiInstallAsRemovable` | bool | !canTouchEfiVariables | Install to fallback EFI path (recommended for Mac) |
 | `theme` | path/null | null | Theme directory (Nix store path) |
+| `resolution` | str/null | null | Screen resolution (e.g. "1920x1080" or "max") |
 | `hideUI` | list of enum | [] | UI elements to hide |
 | `showTools` | list of enum | [shutdown reboot firmware] | Second-row tools |
-| `bannerScale` | enum | fillscreen | Banner scaling |
+| `bannerScale` | enum/null | null | Banner scaling (null = theme default) |
 | `textOnly` | bool | false | Text-only mode |
-| `extraConfig` | lines | "" | Raw config lines |
-| `additionalFiles` | attrsOf path | {} | Extra files for ESP |
-| `resolution` | str/null | null | Screen resolution (e.g. "1920x1080") |
 | `scanfor` | list of enum | [] | Boot entry types to scan for |
 | `dontScanDirs` | list of str | [EFI/nixos ...] | Dirs to exclude from scanning |
 | `useGraphicsFor` | list of enum | [] | OS types to boot in graphics mode |
@@ -110,6 +142,8 @@ Each entry supports: `name`, `loader`, `initrd`, `options`, `icon`, `volume`, `o
 | `enableTouch` | bool | false | Enable touchscreen support |
 | `graceful` | bool | false | Don't fail if ESP not mounted |
 | `extraEntries` | list of submodule | [] | Manual boot entries (Windows, macOS, etc.) |
+| `extraConfig` | lines | "" | Raw config lines (bypasses validation) |
+| `additionalFiles` | attrsOf path | {} | Extra files for ESP |
 
 <!-- BEGIN generated:options -->
 <!-- END generated:options -->
@@ -137,9 +171,6 @@ Runtime validation runs during `nixos-rebuild switch` for themes not built with 
 
 - **rEFInd 0.14.2 `showtools` regression**: Duplicate tool entries appear. Affects all distributions. Workaround: downgrade to 0.14.0.2 or use `hideUI` to reduce clutter.
 - **ESP sizing**: Each NixOS generation copies kernel (~12 MB) + initrd (25-200 MB) to the ESP. With NVIDIA drivers (initrd ~192 MB), a 500 MB ESP holds only 2-3 generations. Set `maxGenerations` accordingly.
-
-<!-- BEGIN generated:options -->
-<!-- END generated:options -->
 
 ## License
 
