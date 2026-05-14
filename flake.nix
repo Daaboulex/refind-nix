@@ -39,7 +39,7 @@
         }
       );
 
-      formatter = forEachSystem (system: (pkgsFor system).nixfmt-rfc-style);
+      formatter = forEachSystem (system: (pkgsFor system).nixfmt);
 
       checks = forEachSystem (
         system:
@@ -64,7 +64,7 @@
         {
           pre-commit-check = git-hooks.lib.${system}.run {
             src = self;
-            hooks.nixfmt-rfc-style.enable = true;
+            hooks.nixfmt.enable = true;
           };
 
           eval-defaults =

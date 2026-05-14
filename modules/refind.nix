@@ -414,6 +414,9 @@ in
 
     system.boot.loader.id = "refind";
 
+    # Override boot.loader.external's mkDefault false — our installer handles initrdSecrets
+    boot.loader.supportsInitrdSecrets = true;
+
     boot.loader.external = {
       enable = true;
       installHook = refindInstaller;
