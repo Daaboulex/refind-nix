@@ -53,6 +53,14 @@ jobs:
             echo "No default package — skipping build (module-only repo)"
           fi
 
+      - name: Run security + eval checks
+        run: |
+          # Build all flake checks (security tests, eval tests, assertion tests)
+          for check in $(nix flake show --json 2>/dev/null | jq -r '.checks."x86_64-linux" // {} | keys[]'); do
+            echo "==> Building check: $check"
+            nix build ".#checks.x86_64-linux.$check" --no-link --print-build-logs
+          done
+
       - name: Verify
         run: |
           if [ ! -f .github/update.json ]; then exit 0; fi
