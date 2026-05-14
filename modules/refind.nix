@@ -25,10 +25,28 @@ let
       timeout = if config.boot.loader.timeout != null then config.boot.loader.timeout else cfg.timeout;
       extraConfig = cfg.extraConfig;
       extraEntries = map (e: {
-        inherit (e) name loader initrd options volume ostype graphics disabled;
+        inherit (e)
+          name
+          loader
+          initrd
+          options
+          volume
+          ostype
+          graphics
+          disabled
+          ;
         icon = if e.icon != null then toString e.icon else null;
         subEntries = map (s: {
-          inherit (s) name loader initrd options volume ostype graphics disabled;
+          inherit (s)
+            name
+            loader
+            initrd
+            options
+            volume
+            ostype
+            graphics
+            disabled
+            ;
           icon = if s.icon != null then toString s.icon else null;
         }) e.subEntries;
       }) cfg.extraEntries;
@@ -232,112 +250,120 @@ in
     };
 
     extraEntries = lib.mkOption {
-      type = lib.types.listOf (lib.types.submodule {
-        options = {
-          name = lib.mkOption {
-            type = lib.types.str;
-            description = "Menu entry label displayed in rEFInd.";
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            name = lib.mkOption {
+              type = lib.types.str;
+              description = "Menu entry label displayed in rEFInd.";
+            };
+            loader = lib.mkOption {
+              type = lib.types.str;
+              description = "EFI binary path (e.g. \\EFI\\Microsoft\\Boot\\bootmgfw.efi).";
+            };
+            initrd = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "initrd path on the ESP. null = omit.";
+            };
+            options = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Kernel/loader options string. null = omit.";
+            };
+            icon = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Path to icon file in the Nix store. null = omit.";
+            };
+            volume = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "Volume label or GUID for the loader. null = omit.";
+            };
+            ostype = lib.mkOption {
+              type = lib.types.nullOr (
+                lib.types.enum [
+                  "Linux"
+                  "Windows"
+                  "MacOS"
+                ]
+              );
+              default = null;
+              description = "OS type hint for rEFInd icon selection. null = omit.";
+            };
+            graphics = lib.mkOption {
+              type = lib.types.nullOr lib.types.bool;
+              default = null;
+              description = "Force graphics mode on/off for this entry. null = omit.";
+            };
+            disabled = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Exclude this entry from the generated config.";
+            };
+            subEntries = lib.mkOption {
+              type = lib.types.listOf (
+                lib.types.submodule {
+                  options = {
+                    name = lib.mkOption {
+                      type = lib.types.str;
+                      description = "Submenu entry label.";
+                    };
+                    loader = lib.mkOption {
+                      type = lib.types.str;
+                      description = "EFI binary path for this submenu entry.";
+                    };
+                    initrd = lib.mkOption {
+                      type = lib.types.nullOr lib.types.str;
+                      default = null;
+                      description = "initrd path for this submenu entry. null = omit.";
+                    };
+                    options = lib.mkOption {
+                      type = lib.types.nullOr lib.types.str;
+                      default = null;
+                      description = "Options string for this submenu entry. null = omit.";
+                    };
+                    icon = lib.mkOption {
+                      type = lib.types.nullOr lib.types.path;
+                      default = null;
+                      description = "Icon path for this submenu entry. null = omit.";
+                    };
+                    volume = lib.mkOption {
+                      type = lib.types.nullOr lib.types.str;
+                      default = null;
+                      description = "Volume for this submenu entry. null = omit.";
+                    };
+                    ostype = lib.mkOption {
+                      type = lib.types.nullOr (
+                        lib.types.enum [
+                          "Linux"
+                          "Windows"
+                          "MacOS"
+                        ]
+                      );
+                      default = null;
+                      description = "OS type for this submenu entry. null = omit.";
+                    };
+                    graphics = lib.mkOption {
+                      type = lib.types.nullOr lib.types.bool;
+                      default = null;
+                      description = "Graphics mode override for this submenu entry. null = omit.";
+                    };
+                    disabled = lib.mkOption {
+                      type = lib.types.bool;
+                      default = false;
+                      description = "Exclude this submenu entry from the generated config.";
+                    };
+                  };
+                }
+              );
+              default = [ ];
+              description = "Submenu entries nested under this entry (one level only).";
+            };
           };
-          loader = lib.mkOption {
-            type = lib.types.str;
-            description = "EFI binary path (e.g. \\EFI\\Microsoft\\Boot\\bootmgfw.efi).";
-          };
-          initrd = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = "initrd path on the ESP. null = omit.";
-          };
-          options = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = "Kernel/loader options string. null = omit.";
-          };
-          icon = lib.mkOption {
-            type = lib.types.nullOr lib.types.path;
-            default = null;
-            description = "Path to icon file in the Nix store. null = omit.";
-          };
-          volume = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = "Volume label or GUID for the loader. null = omit.";
-          };
-          ostype = lib.mkOption {
-            type = lib.types.nullOr (lib.types.enum [
-              "Linux"
-              "Windows"
-              "MacOS"
-            ]);
-            default = null;
-            description = "OS type hint for rEFInd icon selection. null = omit.";
-          };
-          graphics = lib.mkOption {
-            type = lib.types.nullOr lib.types.bool;
-            default = null;
-            description = "Force graphics mode on/off for this entry. null = omit.";
-          };
-          disabled = lib.mkOption {
-            type = lib.types.bool;
-            default = false;
-            description = "Exclude this entry from the generated config.";
-          };
-          subEntries = lib.mkOption {
-            type = lib.types.listOf (lib.types.submodule {
-              options = {
-                name = lib.mkOption {
-                  type = lib.types.str;
-                  description = "Submenu entry label.";
-                };
-                loader = lib.mkOption {
-                  type = lib.types.str;
-                  description = "EFI binary path for this submenu entry.";
-                };
-                initrd = lib.mkOption {
-                  type = lib.types.nullOr lib.types.str;
-                  default = null;
-                  description = "initrd path for this submenu entry. null = omit.";
-                };
-                options = lib.mkOption {
-                  type = lib.types.nullOr lib.types.str;
-                  default = null;
-                  description = "Options string for this submenu entry. null = omit.";
-                };
-                icon = lib.mkOption {
-                  type = lib.types.nullOr lib.types.path;
-                  default = null;
-                  description = "Icon path for this submenu entry. null = omit.";
-                };
-                volume = lib.mkOption {
-                  type = lib.types.nullOr lib.types.str;
-                  default = null;
-                  description = "Volume for this submenu entry. null = omit.";
-                };
-                ostype = lib.mkOption {
-                  type = lib.types.nullOr (lib.types.enum [
-                    "Linux"
-                    "Windows"
-                    "MacOS"
-                  ]);
-                  default = null;
-                  description = "OS type for this submenu entry. null = omit.";
-                };
-                graphics = lib.mkOption {
-                  type = lib.types.nullOr lib.types.bool;
-                  default = null;
-                  description = "Graphics mode override for this submenu entry. null = omit.";
-                };
-                disabled = lib.mkOption {
-                  type = lib.types.bool;
-                  default = false;
-                  description = "Exclude this submenu entry from the generated config.";
-                };
-              };
-            });
-            default = [ ];
-            description = "Submenu entries nested under this entry (one level only).";
-          };
-        };
-      });
+        }
+      );
       default = [ ];
       description = "Manual boot entries for non-NixOS OSes (Windows, macOS, other Linux). Each becomes a rEFInd menuentry block.";
       example = lib.literalExpression ''

@@ -229,10 +229,12 @@
                   CONF
                 '';
               in
-              themePkgs.testers.testBuildFailure (themePkgs.mkRefindTheme {
-                name = "test-pe";
-                src = badSrc;
-              });
+              themePkgs.testers.testBuildFailure (
+                themePkgs.mkRefindTheme {
+                  name = "test-pe";
+                  src = badSrc;
+                }
+              );
 
             security-rejects-efi-ext =
               let
@@ -244,10 +246,12 @@
                   CONF
                 '';
               in
-              themePkgs.testers.testBuildFailure (themePkgs.mkRefindTheme {
-                name = "test-efi";
-                src = badSrc;
-              });
+              themePkgs.testers.testBuildFailure (
+                themePkgs.mkRefindTheme {
+                  name = "test-efi";
+                  src = badSrc;
+                }
+              );
 
             security-rejects-oversized =
               let
@@ -259,10 +263,12 @@
                   CONF
                 '';
               in
-              themePkgs.testers.testBuildFailure (themePkgs.mkRefindTheme {
-                name = "test-oversized";
-                src = badSrc;
-              });
+              themePkgs.testers.testBuildFailure (
+                themePkgs.mkRefindTheme {
+                  name = "test-oversized";
+                  src = badSrc;
+                }
+              );
 
             security-rejects-unknown-directive =
               let
@@ -273,10 +279,12 @@
                   CONF
                 '';
               in
-              themePkgs.testers.testBuildFailure (themePkgs.mkRefindTheme {
-                name = "test-directive";
-                src = badSrc;
-              });
+              themePkgs.testers.testBuildFailure (
+                themePkgs.mkRefindTheme {
+                  name = "test-directive";
+                  src = badSrc;
+                }
+              );
 
             security-rejects-include =
               let
@@ -287,10 +295,12 @@
                   CONF
                 '';
               in
-              themePkgs.testers.testBuildFailure (themePkgs.mkRefindTheme {
-                name = "test-include";
-                src = badSrc;
-              });
+              themePkgs.testers.testBuildFailure (
+                themePkgs.mkRefindTheme {
+                  name = "test-include";
+                  src = badSrc;
+                }
+              );
 
             security-rejects-path-traversal =
               let
@@ -301,10 +311,12 @@
                   CONF
                 '';
               in
-              themePkgs.testers.testBuildFailure (themePkgs.mkRefindTheme {
-                name = "test-traversal";
-                src = badSrc;
-              });
+              themePkgs.testers.testBuildFailure (
+                themePkgs.mkRefindTheme {
+                  name = "test-traversal";
+                  src = badSrc;
+                }
+              );
 
             security-rejects-symlink =
               let
@@ -317,10 +329,12 @@
                   CONF
                 '';
               in
-              themePkgs.testers.testBuildFailure (themePkgs.mkRefindTheme {
-                name = "test-symlink";
-                src = badSrc;
-              });
+              themePkgs.testers.testBuildFailure (
+                themePkgs.mkRefindTheme {
+                  name = "test-symlink";
+                  src = badSrc;
+                }
+              );
           }
         )
       );
