@@ -390,13 +390,36 @@ in
       description = "Extra files to copy to the ESP rEFInd directory. Keys must be relative paths.";
       example = lib.literalExpression ''{ "tools/memtest.efi" = "''${pkgs.memtest86plus.efi}/BOOTX64.efi"; }'';
     };
+
+    allowCoexistWithSystemdBoot = lib.mkEnableOption null // {
+      description = ''
+        Allow rEFInd and systemd-boot to be enabled simultaneously.
+
+        The typical use case is a Mac (where Apple firmware reliably loads
+        the EFI fallback path at `/EFI/BOOT/BOOTx64.EFI` but ignores
+        BootOrder): install rEFInd as the firmware fallback
+        (`efiInstallAsRemovable = true`) so it always loads first, and add
+        an `extraEntries` chainload to `/EFI/systemd/systemd-bootx64.efi`
+        so rEFInd delegates NixOS generation selection to systemd-boot.
+        systemd-boot continues to enumerate NixOS gens declaratively
+        on every `nixos-rebuild switch`.
+
+        Disabled by default to surface accidental dual-install. Opt in
+        explicitly when you understand the chainload setup.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = !config.boot.loader.systemd-boot.enable;
-        message = "refind-nix: rEFInd and systemd-boot cannot both be enabled.";
+        assertion = !config.boot.loader.systemd-boot.enable || cfg.allowCoexistWithSystemdBoot;
+        message = ''
+          refind-nix: rEFInd and systemd-boot are both enabled. Set
+          `boot.loader.refind.allowCoexistWithSystemdBoot = true` to
+          opt-in to the hybrid chainload pattern (refind acts as OS
+          picker; systemd-boot owns the NixOS gen menu).
+        '';
       }
       {
         assertion = !config.boot.loader.grub.enable;
