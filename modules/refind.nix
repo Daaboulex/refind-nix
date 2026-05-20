@@ -410,11 +410,17 @@ in
     };
   };
 
+  # Gate the mkMerge structure purely on cfg.allowCoexistWithSystemdBoot
+  # (user-set; no config-tree reads). Reading
+  # `config.boot.loader.systemd-boot.enable` from a mkMerge branch
+  # creates a module-merge cycle:
+  #   our boot.loader.external.enable →
+  #     external.nix evaluates → reads systemd-boot.enable →
+  #       systemd-boot.nix evaluates → reads boot.loader.external.enable →
+  #         our flake's definition is gated on... LOOP.
+  # Assertions (below) can still reference config.X.enable — they're
+  # evaluated lazily after option merge, no recursion.
   config = lib.mkIf cfg.enable (
-    let
-      coexistingWithSystemdBoot =
-        config.boot.loader.systemd-boot.enable && cfg.allowCoexistWithSystemdBoot;
-    in
     lib.mkMerge [
       {
         assertions = [
@@ -440,12 +446,11 @@ in
             message = "refind-nix: efiInstallAsRemovable and canTouchEfiVariables cannot both be true.";
           }
         ];
-
       }
 
       # Default wiring: refind-nix claims the bootloader install slot via
       # boot.loader.external. Used when refind is the only bootloader.
-      (lib.mkIf (!coexistingWithSystemdBoot) {
+      (lib.mkIf (!cfg.allowCoexistWithSystemdBoot) {
         system.boot.loader.id = "refind";
 
         # Override boot.loader.external's mkDefault false — our installer
@@ -459,16 +464,13 @@ in
       })
 
       # Coexistence wiring: systemd-boot owns `system.build.installBootLoader`
-      # (its installer is the canonical NixOS bootloader install path). We
-      # hook refind's installer into systemd-boot's `extraInstallCommands`
-      # so it runs as a post-step inside the same activation — both
-      # bootloader states refresh atomically on every `nixos-rebuild
-      # switch`, with no conflict on installBootLoader.
-      #
-      # `boot.loader.external` is NOT enabled in this mode (it would fight
-      # systemd-boot for the install slot). refind-nix's `refind-install.py`
-      # runs via systemd-boot's documented post-install hook instead.
-      (lib.mkIf coexistingWithSystemdBoot {
+      # (canonical NixOS bootloader install path). Refind's installer
+      # appends to systemd-boot's `extraInstallCommands` and runs as a
+      # post-step inside the same activation — both bootloader states
+      # refresh atomically on every `nixos-rebuild switch`, no conflict
+      # on installBootLoader. boot.loader.external is NOT enabled here
+      # (it would fight systemd-boot for the install slot).
+      (lib.mkIf cfg.allowCoexistWithSystemdBoot {
         boot.loader.systemd-boot.extraInstallCommands = ''
           ${refindInstaller} "$@"
         '';
