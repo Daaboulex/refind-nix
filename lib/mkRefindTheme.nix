@@ -55,8 +55,10 @@ stdenvNoCC.mkDerivation {
       fi
     done < <(find $out -type f)
 
-    # SECURITY 2: reject .efi extensions (case-insensitive for FAT32)
-    if find $out -iname '*.efi' | grep -q .; then
+    # SECURITY 2: reject .efi extensions (case-insensitive for FAT32).
+    # Scan the SOURCE, not the whitelisted $out — a .efi outside the install
+    # whitelist would otherwise be filtered out and never rejected.
+    if find "$srcDir" -iname '*.efi' | grep -q .; then
       echo "SECURITY: EFI file extension in theme" >&2
       exit 1
     fi
@@ -75,8 +77,9 @@ stdenvNoCC.mkDerivation {
       fi
     fi
 
-    # SECURITY 5: reject symlinks
-    if find $out -type l | grep -q .; then
+    # SECURITY 5: reject symlinks. Scan the SOURCE, not the whitelisted $out —
+    # a symlink outside the install whitelist would otherwise be filtered out.
+    if find "$srcDir" -type l | grep -q .; then
       echo "SECURITY: symlink in theme" >&2
       exit 1
     fi
