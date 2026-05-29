@@ -3,48 +3,47 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
     git-hooks = {
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    std = {
+      url = "github:Daaboulex/nix-packaging-standard?ref=v2.2.1";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.git-hooks.follows = "git-hooks";
+    };
   };
 
   outputs =
-    {
-      self,
+    inputs@{
+      flake-parts,
       nixpkgs,
-      git-hooks,
+      self,
+      ...
     }:
-    let
-      supportedSystems = [
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
         "x86_64-linux"
         "aarch64-linux"
       ];
-      forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
-      pkgsFor = system: import nixpkgs { localSystem.system = system; };
-    in
-    {
-      nixosModules.default = import ./modules/refind.nix { inherit self; };
 
-      overlays.default = import ./overlays/default.nix { inherit self; };
+      imports = [ inputs.std.flakeModules.base ];
 
-      packages = forEachSystem (
-        system:
+      flake.nixosModules.default = import ./module.nix { inherit self; };
+      flake.overlays.default = import ./overlays/default.nix { inherit self; };
+
+      perSystem =
+        { system, pkgs, ... }:
         let
-          pkgs = (pkgsFor system).extend self.overlays.default;
-        in
-        {
-          refind-theme-minimal = pkgs.refind-theme-minimal;
-          default = pkgs.refind-theme-minimal;
-        }
-      );
-
-      formatter = forEachSystem (system: (pkgsFor system).nixfmt);
-
-      checks = forEachSystem (
-        system:
-        let
-          pkgs = pkgsFor system;
+          themePkgs = pkgs.extend self.overlays.default;
+          throws = x: !(builtins.tryEval (builtins.seq x x)).success;
+          mkTest =
+            modules:
+            nixpkgs.lib.nixosSystem {
+              inherit system;
+              modules = [ self.nixosModules.default ] ++ modules;
+            };
           minimalBase = {
             boot.loader.efi.canTouchEfiVariables = true;
             boot.loader.refind.enable = true;
@@ -54,171 +53,157 @@
             };
             boot.loader.efi.efiSysMountPoint = "/boot";
           };
-          mkTest =
-            modules:
-            nixpkgs.lib.nixosSystem {
-              inherit system;
-              modules = [ self.nixosModules.default ] ++ modules;
-            };
+          validConf = ''
+            banner background.png
+            icons_dir icons
+          '';
         in
         {
-          pre-commit-check = git-hooks.lib.${system}.run {
-            src = self;
-            hooks.nixfmt.enable = true;
-          };
+          packages.refind-theme-minimal = themePkgs.refind-theme-minimal;
+          packages.default = themePkgs.refind-theme-minimal;
 
-          eval-defaults =
-            let
-              testSystem = mkTest [ minimalBase ];
-              enabled = builtins.toJSON testSystem.config.boot.loader.refind.enable;
-            in
-            pkgs.runCommand "eval-defaults" { inherit enabled; } ''
-              [[ "$enabled" == "true" ]] || { echo "FAIL: expected enable=true, got $enabled"; exit 1; }
-              touch $out
-            '';
+          # rEFInd's bespoke option-eval, assertion-rejection, and theme-security
+          # checks — richer than the generic std module-eval, so they stay.
+          checks = {
+            eval-defaults =
+              let
+                testSystem = mkTest [ minimalBase ];
+                enabled = builtins.toJSON testSystem.config.boot.loader.refind.enable;
+              in
+              pkgs.runCommand "eval-defaults" { inherit enabled; } ''
+                [[ "$enabled" == "true" ]] || { echo "FAIL: expected enable=true, got $enabled"; exit 1; }
+                touch $out
+              '';
 
-          eval-all-options =
-            let
-              testSystem = mkTest [
-                minimalBase
-                {
-                  boot.loader.refind = {
-                    timeout = 5;
-                    maxGenerations = 10;
-                    resolution = "1920x1080";
-                    hideUI = [ "editor" ];
-                    showTools = [ "shutdown" ];
-                    bannerScale = "noscale";
-                    textOnly = true;
-                    scanfor = [ "manual" ];
-                    dontScanDirs = [ "EFI/test" ];
-                    useGraphicsFor = [ "linux" ];
-                    enableMouse = true;
-                    enableTouch = true;
-                    graceful = true;
-                    defaultSelection = "1";
-                    extraEntries = [
+            eval-all-options =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  {
+                    boot.loader.refind = {
+                      timeout = 5;
+                      maxGenerations = 10;
+                      resolution = "1920x1080";
+                      hideUI = [ "editor" ];
+                      showTools = [ "shutdown" ];
+                      bannerScale = "noscale";
+                      textOnly = true;
+                      scanfor = [ "manual" ];
+                      dontScanDirs = [ "EFI/test" ];
+                      useGraphicsFor = [ "linux" ];
+                      enableMouse = true;
+                      enableTouch = true;
+                      graceful = true;
+                      defaultSelection = "1";
+                      extraEntries = [
+                        {
+                          name = "Windows";
+                          loader = ''\\EFI\\Microsoft\\Boot\\bootmgfw.efi'';
+                          ostype = "Windows";
+                        }
+                      ];
+                    };
+                  }
+                ];
+                timeout = builtins.toJSON testSystem.config.boot.loader.refind.timeout;
+                maxGenerations = builtins.toJSON testSystem.config.boot.loader.refind.maxGenerations;
+              in
+              pkgs.runCommand "eval-all-options" { inherit timeout maxGenerations; } ''
+                [[ "$timeout" == "5" ]] || { echo "FAIL: timeout expected 5, got $timeout"; exit 1; }
+                [[ "$maxGenerations" == "10" ]] || { echo "FAIL: maxGenerations expected 10, got $maxGenerations"; exit 1; }
+                touch $out
+              '';
+
+            eval-extra-entries =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  {
+                    boot.loader.refind.extraEntries = [
                       {
                         name = "Windows";
                         loader = ''\\EFI\\Microsoft\\Boot\\bootmgfw.efi'';
                         ostype = "Windows";
+                        subEntries = [
+                          {
+                            name = "Windows (safe mode)";
+                            loader = ''\\EFI\\Microsoft\\Boot\\bootmgfw.efi'';
+                            options = "/safeboot:network";
+                          }
+                        ];
                       }
                     ];
-                  };
-                }
-              ];
-              timeout = builtins.toJSON testSystem.config.boot.loader.refind.timeout;
-              maxGenerations = builtins.toJSON testSystem.config.boot.loader.refind.maxGenerations;
-            in
-            pkgs.runCommand "eval-all-options" { inherit timeout maxGenerations; } ''
-              [[ "$timeout" == "5" ]] || { echo "FAIL: timeout expected 5, got $timeout"; exit 1; }
-              [[ "$maxGenerations" == "10" ]] || { echo "FAIL: maxGenerations expected 10, got $maxGenerations"; exit 1; }
-              touch $out
-            '';
+                  }
+                ];
+                entryCount = builtins.toJSON (builtins.length testSystem.config.boot.loader.refind.extraEntries);
+              in
+              pkgs.runCommand "eval-extra-entries" { inherit entryCount; } ''
+                [[ "$entryCount" == "1" ]] || { echo "FAIL: expected 1 entry, got $entryCount"; exit 1; }
+                touch $out
+              '';
 
-          eval-extra-entries =
-            let
-              testSystem = mkTest [
-                minimalBase
-                {
-                  boot.loader.refind.extraEntries = [
-                    {
-                      name = "Windows";
-                      loader = ''\\EFI\\Microsoft\\Boot\\bootmgfw.efi'';
-                      ostype = "Windows";
-                      subEntries = [
-                        {
-                          name = "Windows (safe mode)";
-                          loader = ''\\EFI\\Microsoft\\Boot\\bootmgfw.efi'';
-                          options = "/safeboot:network";
-                        }
-                      ];
-                    }
-                  ];
-                }
-              ];
-              entryCount = builtins.toJSON (builtins.length testSystem.config.boot.loader.refind.extraEntries);
-            in
-            pkgs.runCommand "eval-extra-entries" { inherit entryCount; } ''
-              [[ "$entryCount" == "1" ]] || { echo "FAIL: expected 1 entry, got $entryCount"; exit 1; }
-              touch $out
-            '';
+            assert-rejects-systemd-boot =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  { boot.loader.systemd-boot.enable = true; }
+                ];
+                didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
+              in
+              pkgs.runCommand "assert-rejects-systemd-boot" { inherit didThrow; } ''
+                [[ "$didThrow" == "true" ]] || { echo "FAIL: expected assertion to throw"; exit 1; }
+                touch $out
+              '';
 
-          assert-rejects-systemd-boot =
-            let
-              throws = x: !(builtins.tryEval (builtins.seq x x)).success;
-              testSystem = mkTest [
-                minimalBase
-                { boot.loader.systemd-boot.enable = true; }
-              ];
-              didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
-            in
-            pkgs.runCommand "assert-rejects-systemd-boot" { inherit didThrow; } ''
-              [[ "$didThrow" == "true" ]] || { echo "FAIL: expected assertion to throw"; exit 1; }
-              touch $out
-            '';
+            assert-rejects-grub =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  {
+                    boot.loader.grub.enable = true;
+                    boot.loader.grub.device = "/dev/sda";
+                  }
+                ];
+                didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
+              in
+              pkgs.runCommand "assert-rejects-grub" { inherit didThrow; } ''
+                [[ "$didThrow" == "true" ]] || { echo "FAIL: expected assertion to throw"; exit 1; }
+                touch $out
+              '';
 
-          assert-rejects-grub =
-            let
-              throws = x: !(builtins.tryEval (builtins.seq x x)).success;
-              testSystem = mkTest [
-                minimalBase
-                {
-                  boot.loader.grub.enable = true;
-                  boot.loader.grub.device = "/dev/sda";
-                }
-              ];
-              didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
-            in
-            pkgs.runCommand "assert-rejects-grub" { inherit didThrow; } ''
-              [[ "$didThrow" == "true" ]] || { echo "FAIL: expected assertion to throw"; exit 1; }
-              touch $out
-            '';
+            assert-rejects-removable-with-nvram =
+              let
+                testSystem = mkTest [
+                  {
+                    boot.loader.efi.canTouchEfiVariables = true;
+                    boot.loader.refind = {
+                      enable = true;
+                      efiInstallAsRemovable = true;
+                    };
+                    fileSystems."/" = {
+                      device = "/dev/sda1";
+                      fsType = "ext4";
+                    };
+                    boot.loader.efi.efiSysMountPoint = "/boot";
+                  }
+                ];
+                didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
+              in
+              pkgs.runCommand "assert-rejects-removable-with-nvram" { inherit didThrow; } ''
+                [[ "$didThrow" == "true" ]] || { echo "FAIL: expected assertion to throw"; exit 1; }
+                touch $out
+              '';
 
-          assert-rejects-removable-with-nvram =
-            let
-              throws = x: !(builtins.tryEval (builtins.seq x x)).success;
-              testSystem = mkTest [
-                {
-                  boot.loader.efi.canTouchEfiVariables = true;
-                  boot.loader.refind = {
-                    enable = true;
-                    efiInstallAsRemovable = true;
-                  };
-                  fileSystems."/" = {
-                    device = "/dev/sda1";
-                    fsType = "ext4";
-                  };
-                  boot.loader.efi.efiSysMountPoint = "/boot";
-                }
-              ];
-              didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
-            in
-            pkgs.runCommand "assert-rejects-removable-with-nvram" { inherit didThrow; } ''
-              [[ "$didThrow" == "true" ]] || { echo "FAIL: expected assertion to throw"; exit 1; }
-              touch $out
-            '';
+            assert-accepts-valid =
+              let
+                testSystem = mkTest [ minimalBase ];
+                didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
+              in
+              pkgs.runCommand "assert-accepts-valid" { inherit didThrow; } ''
+                [[ "$didThrow" == "false" ]] || { echo "FAIL: valid config should not throw"; exit 1; }
+                touch $out
+              '';
 
-          assert-accepts-valid =
-            let
-              throws = x: !(builtins.tryEval (builtins.seq x x)).success;
-              testSystem = mkTest [ minimalBase ];
-              didThrow = builtins.toJSON (throws testSystem.config.system.build.toplevel);
-            in
-            pkgs.runCommand "assert-accepts-valid" { inherit didThrow; } ''
-              [[ "$didThrow" == "false" ]] || { echo "FAIL: valid config should not throw"; exit 1; }
-              touch $out
-            '';
-        }
-        // (
-          let
-            themePkgs = (pkgsFor system).extend self.overlays.default;
-            validConf = ''
-              banner background.png
-              icons_dir icons
-            '';
-          in
-          {
             security-rejects-pe =
               let
                 badSrc = themePkgs.runCommand "bad-theme-pe" { } ''
@@ -335,22 +320,7 @@
                   src = badSrc;
                 }
               );
-          }
-        )
-      );
-
-      devShells = forEachSystem (
-        system:
-        let
-          pkgs = pkgsFor system;
-        in
-        {
-          default = pkgs.mkShell {
-            inherit (self.checks.${system}.pre-commit-check) shellHook;
-            buildInputs = self.checks.${system}.pre-commit-check.enabledPackages;
-            packages = with pkgs; [ nil ];
           };
-        }
-      );
+        };
     };
 }

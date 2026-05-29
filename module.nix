@@ -68,7 +68,7 @@ let
   );
 
   refindInstaller = pkgs.replaceVarsWith {
-    src = ../installer/refind-install.py;
+    src = ./installer/refind-install.py;
     isExecutable = true;
     replacements = {
       python3 = pkgs.python3.withPackages (ps: [ ps.psutil ]);

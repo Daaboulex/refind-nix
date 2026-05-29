@@ -16,6 +16,7 @@ Declarative rEFInd bootloader for NixOS — typed options, first-class theming, 
 | **Project** | Original code (no upstream) |
 | **License** | N/A |
 | **Tracked** | N/A |
+
 <!-- END generated:upstream -->
 
 ## Features
