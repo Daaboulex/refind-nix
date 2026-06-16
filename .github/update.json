@@ -9,5 +9,17 @@
     "binary": null,
     "args": null,
     "check": "eval"
-  }
+  },
+  "description": "rEFInd boot manager packaged for NixOS - declarative module with typed options, theming, and ESP security validation",
+  "topics": [
+    "nix",
+    "nixos",
+    "flake",
+    "nixos-module",
+    "refind",
+    "bootloader",
+    "efi",
+    "uefi",
+    "boot-manager"
+  ]
 }
