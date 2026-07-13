@@ -31,7 +31,7 @@
       imports = [ inputs.std.flakeModules.base ];
 
       flake.nixosModules.default = import ./module.nix { inherit self; };
-      flake.overlays.default = import ./overlays/default.nix { inherit self; };
+      flake.overlays.default = import ./overlay.nix { inherit self; };
 
       perSystem =
         { system, pkgs, ... }:
