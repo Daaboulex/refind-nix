@@ -43,6 +43,13 @@ stdenvNoCC.mkDerivation {
     [ -d "$srcDir/icons" ] && cp -r "$srcDir/icons" $out/
     [ -d "$srcDir/fonts" ] && cp -r "$srcDir/fonts" $out/
 
+    # rEFInd resolves theme.conf paths against the rEFInd binary's own
+    # directory, and the installer deploys every theme to themes/active.
+    # Upstream themes point at their own install name, so repoint them or
+    # the banner, icons and selection images silently never load. Values
+    # starting with / are left for the fixupPhase to reject.
+    sed -i -E 's#^([[:space:]]*(banner|icons_dir|selection_big|selection_small|font)[[:space:]]+)(themes/[^/[:space:]]+/)?([^/[:space:]])#\1themes/active/\4#' $out/theme.conf
+
     runHook postInstall
   '';
 

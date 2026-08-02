@@ -12,6 +12,11 @@ let
   cfg = config.boot.loader.refind;
   efi = config.boot.loader.efi;
 
+  sbctlConfigFile = (pkgs.formats.yaml { }).generate "refind-sbctl.conf" {
+    keydir = "${cfg.secureBoot.pkiBundle}/keys";
+    guid = "${cfg.secureBoot.pkiBundle}/GUID";
+  };
+
   refindInstallConfig = pkgs.writeText "refind-install.json" (
     builtins.toJSON {
       nixPath = config.nix.package;
@@ -20,9 +25,20 @@ let
       efiMountPoint = efi.efiSysMountPoint;
       canTouchEfiVariables = efi.canTouchEfiVariables;
       efiRemovable = cfg.efiInstallAsRemovable;
+      manageNvram = cfg.manageNvram;
+      generateNixosEntries = cfg.generateNixosEntries;
+      sign =
+        if cfg.secureBoot.enable then
+          {
+            sbctlPath = cfg.secureBoot.sbctlPackage;
+            configFile = sbctlConfigFile;
+            inherit (cfg.secureBoot) pkiBundle;
+          }
+        else
+          null;
       maxGenerations = if cfg.maxGenerations == null then 0 else cfg.maxGenerations;
       hostArchitecture = pkgs.stdenv.hostPlatform.parsed.cpu;
-      timeout = if config.boot.loader.timeout != null then config.boot.loader.timeout else cfg.timeout;
+      timeout = cfg.timeout;
       extraConfig = cfg.extraConfig;
       extraEntries = map (e: {
         inherit (e)
@@ -88,14 +104,66 @@ in
 
     timeout = lib.mkOption {
       type = lib.types.int;
-      default = 10;
-      description = "Timeout in seconds before auto-boot.";
+      default = if config.boot.loader.timeout != null then config.boot.loader.timeout else 10;
+      defaultText = lib.literalExpression "config.boot.loader.timeout, or 10 when that is null";
+      description = ''
+        Seconds the rEFInd menu waits before booting its default entry.
+
+        Follows the system-wide `boot.loader.timeout` unless set here, so a
+        chainloaded second menu can carry its own timeout.
+      '';
     };
 
     maxGenerations = lib.mkOption {
       type = lib.types.nullOr lib.types.ints.positive;
       default = 50;
-      description = "Maximum generations in boot menu. null = unlimited.";
+      description = "Maximum generations in boot menu. null = unlimited. Ignored when generateNixosEntries is false.";
+    };
+
+    generateNixosEntries = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Generate a menuentry per NixOS generation, copying each kernel and
+        initrd to the ESP.
+
+        Set false for UKI-native setups (lanzaboote, systemd-ukify): the
+        signed unified kernel images already on the ESP are found by
+        rEFInd's own directory scan, so copied kernels would be redundant
+        and — under Secure Boot — unsigned and unbootable. rEFInd then
+        installs only its binary, config and theme; existing copied kernels
+        are removed on the next install.
+      '';
+    };
+
+    manageNvram = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Let the installer create, replace and reorder rEFInd's NVRAM boot
+        entry (requires boot.loader.efi.canTouchEfiVariables).
+
+        Set false to own the boot entry yourself — for instance while
+        migrating rEFInd between ESPs, where the existing entry is the
+        rollback path and must survive the switch.
+      '';
+    };
+
+    secureBoot = {
+      enable = lib.mkEnableOption "signing the installed rEFInd binary with sbctl";
+
+      sbctlPackage = lib.mkPackageOption pkgs "sbctl" { };
+
+      pkiBundle = lib.mkOption {
+        type = lib.types.strMatching "/.+";
+        default = "/var/lib/sbctl";
+        description = ''
+          Absolute path to the sbctl PKI bundle holding keys/ and GUID.
+
+          A string, never a Nix path: a path literal would copy the private
+          Secure Boot keys into the world-readable Nix store.
+        '';
+      };
     };
 
     defaultSelection = lib.mkOption {
@@ -213,9 +281,11 @@ in
       type = lib.types.listOf (lib.types.strMatching "[^\n\r,]+");
       default = [
         "EFI/nixos"
-        (if cfg.efiInstallAsRemovable then "efi/boot/kernels" else "efi/refind/kernels")
-      ];
-      defaultText = lib.literalExpression ''[ "EFI/nixos" (if efiInstallAsRemovable then "efi/boot/kernels" else "efi/refind/kernels") ]'';
+      ]
+      ++ lib.optional cfg.generateNixosEntries (
+        if cfg.efiInstallAsRemovable then "efi/boot/kernels" else "efi/refind/kernels"
+      );
+      defaultText = lib.literalExpression ''[ "EFI/nixos" ] ++ lib.optional generateNixosEntries (if efiInstallAsRemovable then "efi/boot/kernels" else "efi/refind/kernels")'';
       description = "Directories to exclude from boot entry scanning.";
     };
 
@@ -408,6 +478,23 @@ in
         explicitly when you understand the chainload setup.
       '';
     };
+
+    allowCoexistWithExternalInstaller = lib.mkEnableOption null // {
+      description = ''
+        Install rEFInd after an external bootloader installer that owns
+        `boot.loader.external` — lanzaboote being the common case.
+
+        `boot.loader.external.installHook` holds a single program, so both
+        installers cannot claim it. With this set, rEFInd chains instead:
+        `system.build.installBootLoader` becomes a script that runs the
+        external hook first and the rEFInd installer second, so one
+        `nixos-rebuild switch` refreshes both and a failure in either
+        fails the switch.
+
+        Pair with `generateNixosEntries = false`: lanzaboote's signed
+        unified kernel images are what rEFInd should list.
+      '';
+    };
   };
 
   # Gate the mkMerge structure purely on cfg.allowCoexistWithSystemdBoot
@@ -434,6 +521,35 @@ in
             '';
           }
           {
+            assertion = !cfg.allowCoexistWithSystemdBoot || config.boot.loader.systemd-boot.enable;
+            message = ''
+              refind-nix: `allowCoexistWithSystemdBoot` is set but
+              `boot.loader.systemd-boot.enable` is false, so rEFInd would
+              never install — its installer runs from systemd-boot's
+              `extraInstallCommands`, which nothing executes. Under
+              lanzaboote set `allowCoexistWithExternalInstaller` instead;
+              with no other bootloader leave both off and let rEFInd own
+              the install slot.
+            '';
+          }
+          {
+            assertion = !(cfg.allowCoexistWithSystemdBoot && cfg.allowCoexistWithExternalInstaller);
+            message = "refind-nix: allowCoexistWithSystemdBoot and allowCoexistWithExternalInstaller are mutually exclusive — pick the installer rEFInd chains after.";
+          }
+          {
+            assertion = !cfg.allowCoexistWithExternalInstaller || config.boot.loader.external.enable;
+            message = "refind-nix: allowCoexistWithExternalInstaller requires an external bootloader installer (boot.loader.external.enable, e.g. lanzaboote) for rEFInd to chain after.";
+          }
+          {
+            assertion = !(config.boot.lanzaboote.enable or false) || cfg.allowCoexistWithExternalInstaller;
+            message = ''
+              refind-nix: lanzaboote is enabled — set
+              `boot.loader.refind.allowCoexistWithExternalInstaller = true`
+              so rEFInd installs after it instead of fighting it for
+              `boot.loader.external.installHook`.
+            '';
+          }
+          {
             assertion = !config.boot.loader.grub.enable;
             message = "refind-nix: rEFInd and GRUB cannot both be enabled.";
           }
@@ -450,7 +566,7 @@ in
 
       # Default wiring: refind-nix claims the bootloader install slot via
       # boot.loader.external. Used when refind is the only bootloader.
-      (lib.mkIf (!cfg.allowCoexistWithSystemdBoot) {
+      (lib.mkIf (!cfg.allowCoexistWithSystemdBoot && !cfg.allowCoexistWithExternalInstaller) {
         system.boot.loader.id = "refind";
 
         # Override boot.loader.external's mkDefault false — our installer
@@ -474,6 +590,21 @@ in
         boot.loader.systemd-boot.extraInstallCommands = ''
           ${refindInstaller} "$@"
         '';
+      })
+
+      # External-installer coexistence: `boot.loader.external.installHook`
+      # holds one program, so rEFInd chains after its owner (lanzaboote)
+      # by taking over `system.build.installBootLoader` and calling both.
+      # Reading `boot.loader.external.installHook` here is cycle-free — in
+      # this branch refind-nix never defines it.
+      (lib.mkIf cfg.allowCoexistWithExternalInstaller {
+        system.build.installBootLoader = lib.mkForce (
+          pkgs.writeShellScript "refind-chained-install" ''
+            set -eu
+            ${config.boot.loader.external.installHook} "$@"
+            ${refindInstaller} "$@"
+          ''
+        );
       })
     ]
   );

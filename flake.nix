@@ -53,6 +53,34 @@
             };
             boot.loader.efi.efiSysMountPoint = "/boot";
           };
+          externalInstallerBase = {
+            boot.loader.external = {
+              enable = true;
+              installHook = "${pkgs.writeShellScript "fake-external-install" "echo external-installer-ran"}";
+            };
+          };
+          # Follows the real install path — the bootloader hook the system
+          # would run — to the installer's own config, so a check sees what
+          # the installer sees rather than what the option tree claims.
+          installerConfigOf =
+            testSystem: name:
+            pkgs.runCommand name { hook = testSystem.config.system.build.installBootLoader; } ''
+              json=""
+              for candidate in "$hook" $(grep -oE '/nix/store/[a-z0-9]{32}-[^"'"'"' )]*' "$hook" | sort -u); do
+                [ -f "$candidate" ] || continue
+                found=$(grep -oE '/nix/store/[a-z0-9]{32}-refind-install\.json' "$candidate" | head -1 || true)
+                if [ -n "$found" ]; then json="$found"; break; fi
+              done
+              [ -n "$json" ] || { echo "FAIL: install hook $hook does not reach a refind-install.json"; exit 1; }
+              cp "$json" $out
+            '';
+          # Names the assertion that fired, not merely that something threw —
+          # an unconfigured test system throws for its own reasons.
+          failedAssertionsOf =
+            testSystem:
+            builtins.concatStringsSep "\n" (
+              map (a: a.message) (builtins.filter (a: !a.assertion) testSystem.config.assertions)
+            );
           validConf = ''
             banner background.png
             icons_dir icons
@@ -60,6 +88,7 @@
         in
         {
           packages.refind-theme-minimal = themePkgs.refind-theme-minimal;
+          packages.refind-theme-regular = themePkgs.refind-theme-regular;
           packages.default = themePkgs.refind-theme-minimal;
 
           # rEFInd's bespoke option-eval, assertion-rejection, and theme-security
@@ -154,6 +183,175 @@
                 [[ "$didThrow" == "true" ]] || { echo "FAIL: expected assertion to throw"; exit 1; }
                 touch $out
               '';
+
+            eval-uki-native-installer-config =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  externalInstallerBase
+                  {
+                    boot.loader.refind = {
+                      allowCoexistWithExternalInstaller = true;
+                      generateNixosEntries = false;
+                      manageNvram = false;
+                      secureBoot.enable = true;
+                    };
+                  }
+                ];
+              in
+              pkgs.runCommand "eval-uki-native-installer-config"
+                { json = installerConfigOf testSystem "uki-native-install-json"; }
+                ''
+                  grep -q '"generateNixosEntries":false' "$json" || { echo "FAIL: generation entries still generated"; cat "$json"; exit 1; }
+                  grep -q '"manageNvram":false' "$json" || { echo "FAIL: installer would still rewrite NVRAM"; exit 1; }
+                  grep -q '"pkiBundle":"/var/lib/sbctl"' "$json" || { echo "FAIL: sbctl PKI bundle not wired"; exit 1; }
+                  grep -q '"sbctlPath":"/nix/store/' "$json" || { echo "FAIL: sbctl package not wired"; exit 1; }
+                  touch $out
+                '';
+
+            eval-timeout-is-refind-own =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  {
+                    boot.loader.timeout = 30;
+                    boot.loader.refind.timeout = 5;
+                  }
+                ];
+              in
+              pkgs.runCommand "eval-timeout-is-refind-own"
+                { json = installerConfigOf testSystem "timeout-install-json"; }
+                ''
+                  grep -q '"timeout":5' "$json" || { echo "FAIL: boot.loader.timeout overrode the explicit rEFInd timeout"; cat "$json"; exit 1; }
+                  touch $out
+                '';
+
+            eval-timeout-follows-loader-default =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  { boot.loader.timeout = 30; }
+                ];
+              in
+              pkgs.runCommand "eval-timeout-follows-loader-default"
+                { json = installerConfigOf testSystem "timeout-default-install-json"; }
+                ''
+                  grep -q '"timeout":30' "$json" || { echo "FAIL: unset rEFInd timeout must follow boot.loader.timeout"; cat "$json"; exit 1; }
+                  touch $out
+                '';
+
+            eval-default-installer-config =
+              let
+                testSystem = mkTest [ minimalBase ];
+              in
+              pkgs.runCommand "eval-default-installer-config"
+                { json = installerConfigOf testSystem "default-install-json"; }
+                ''
+                  grep -q '"generateNixosEntries":true' "$json" || { echo "FAIL: default must still generate generation entries"; exit 1; }
+                  grep -q '"manageNvram":true' "$json" || { echo "FAIL: default must still manage NVRAM"; exit 1; }
+                  grep -q '"sign":null' "$json" || { echo "FAIL: signing must be off by default"; exit 1; }
+                  touch $out
+                '';
+
+            wiring-chains-after-external-installer =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  externalInstallerBase
+                  { boot.loader.refind.allowCoexistWithExternalInstaller = true; }
+                ];
+              in
+              pkgs.runCommand "wiring-chains-after-external-installer"
+                { hook = testSystem.config.system.build.installBootLoader; }
+                ''
+                  grep -q 'fake-external-install' "$hook" || { echo "FAIL: external installer not chained — it would never run"; cat "$hook"; exit 1; }
+                  grep -q 'refind-install' "$hook" || { echo "FAIL: rEFInd installer not chained — it would never run"; cat "$hook"; exit 1; }
+                  grep -q '^set -eu' "$hook" || { echo "FAIL: chained install does not abort on a failing installer"; exit 1; }
+                  touch $out
+                '';
+
+            assert-rejects-sdboot-coexist-without-sdboot =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  { boot.loader.refind.allowCoexistWithSystemdBoot = true; }
+                ];
+              in
+              pkgs.runCommand "assert-rejects-sdboot-coexist-without-sdboot"
+                {
+                  failed = failedAssertionsOf testSystem;
+                }
+                ''
+                  grep -q 'systemd-boot.enable. is false' <<< "$failed" || { echo "FAIL: the silent no-op guard did not fire — rEFInd would never install. Failing assertions: $failed"; exit 1; }
+                  touch $out
+                '';
+
+            assert-rejects-external-coexist-without-external =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  { boot.loader.refind.allowCoexistWithExternalInstaller = true; }
+                ];
+              in
+              pkgs.runCommand "assert-rejects-external-coexist-without-external"
+                {
+                  failed = failedAssertionsOf testSystem;
+                }
+                ''
+                  grep -q 'requires an external bootloader installer' <<< "$failed" || { echo "FAIL: coexistence with a missing external installer accepted. Failing assertions: $failed"; exit 1; }
+                  touch $out
+                '';
+
+            assert-rejects-lanzaboote-without-coexist =
+              let
+                testSystem = mkTest [
+                  minimalBase
+                  (
+                    { lib, ... }:
+                    {
+                      options.boot.lanzaboote.enable = lib.mkEnableOption "lanzaboote stand-in";
+                      config.boot.lanzaboote.enable = true;
+                    }
+                  )
+                ];
+              in
+              pkgs.runCommand "assert-rejects-lanzaboote-without-coexist"
+                {
+                  failed = failedAssertionsOf testSystem;
+                }
+                ''
+                  grep -q 'lanzaboote is enabled' <<< "$failed" || { echo "FAIL: lanzaboote install-slot conflict accepted. Failing assertions: $failed"; exit 1; }
+                  touch $out
+                '';
+
+            theme-paths-point-at-deployed-dir =
+              pkgs.runCommand "theme-paths-point-at-deployed-dir"
+                {
+                  minimal = themePkgs.refind-theme-minimal;
+                  regular = themePkgs.refind-theme-regular;
+                }
+                ''
+                  for theme in "$minimal" "$regular"; do
+                    while read -r directive value; do
+                      case "$value" in
+                        themes/active/*) ;;
+                        *) echo "FAIL: $theme theme.conf $directive points at $value, not the deployed themes/active dir"; exit 1 ;;
+                      esac
+                    done < <(grep -E '^[[:space:]]*(banner|icons_dir|selection_big|selection_small|font)[[:space:]]' "$theme/theme.conf")
+                  done
+                  touch $out
+                '';
+
+            theme-regular-selection-present =
+              pkgs.runCommand "theme-regular-selection-present" { regular = themePkgs.refind-theme-regular; }
+                ''
+                  while read -r directive value; do
+                    target="$regular/''${value#themes/active/}"
+                    [ -e "$target" ] || { echo "FAIL: theme.conf $directive references $value, which the theme does not ship"; exit 1; }
+                  done < <(grep -E '^[[:space:]]*(banner|icons_dir|selection_big|selection_small|font)[[:space:]]' "$regular/theme.conf")
+                  [ -f "$regular/icons/os_nixos.png" ] || { echo "FAIL: NixOS icon missing"; exit 1; }
+                  touch $out
+                '';
 
             assert-rejects-grub =
               let

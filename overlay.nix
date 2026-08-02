@@ -4,4 +4,5 @@ final: prev: {
   mkRefindTheme = final.callPackage ./lib/mkRefindTheme.nix { };
   refind-themes = final.callPackage ./themes { };
   refind-theme-minimal = final.refind-themes.minimal;
+  refind-theme-regular = final.refind-themes.regular;
 }

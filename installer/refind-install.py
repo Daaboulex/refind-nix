@@ -2,7 +2,8 @@
 #
 # refind-install.py — extended nixpkgs rEFInd installer.
 # Base: nixpkgs/nixos/modules/system/boot/loader/refind/refind-install.py
-# Extensions: theme deployment, dont_scan_dirs, #452075 fix, #453812 fix, orphan scan.
+# Extensions: theme deployment, dont_scan_dirs, #452075 fix, #453812 fix, orphan scan,
+# sbctl signing (fail-closed), UKI-native mode, NVRAM opt-out, vars/ preservation.
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -250,6 +251,43 @@ def generate_extra_entries() -> str:
     return result
 
 
+def sbctl_sign(path: str) -> None:
+    sign = config('sign')
+    sbctl = os.path.join(str(sign['sbctlPath']), 'bin', 'sbctl')
+    subprocess.check_output(
+        [sbctl, '--config', str(sign['configFile']), 'sign', '-s', path],
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        timeout=SUBPROCESS_TIMEOUT,
+    )
+
+
+def check_signing_prerequisites() -> None:
+    sign = config('sign')
+    if sign is None:
+        return
+    sbctl = os.path.join(str(sign['sbctlPath']), 'bin', 'sbctl')
+    if not os.access(sbctl, os.X_OK):
+        raise RuntimeError(f'refind-install: signing enabled but sbctl is not executable: {sbctl}')
+    for relative in ('keys/db/db.key', 'keys/db/db.pem', 'GUID'):
+        required = os.path.join(str(sign['pkiBundle']), relative)
+        if not os.path.exists(required):
+            raise RuntimeError(
+                f'refind-install: signing enabled but the sbctl PKI is incomplete: {required} is missing'
+            )
+
+
+def find_partuuid(part_device: str) -> Optional[str]:
+    by_partuuid = '/dev/disk/by-partuuid'
+    if not os.path.isdir(by_partuuid):
+        return None
+    target = os.path.realpath(part_device)
+    for name in os.listdir(by_partuuid):
+        if os.path.realpath(os.path.join(by_partuuid, name)) == target:
+            return name
+    return None
+
+
 def find_disk_device(part: str) -> str:
     part = os.path.realpath(part)
     part = part.removeprefix('/dev/')
@@ -282,7 +320,7 @@ def fsync_directory(path: str) -> None:
         os.close(fd)
 
 
-def copy_file(from_path: str, to_path: str):
+def copy_file(from_path: str, to_path: str, sign: bool = False):
     dirname = os.path.dirname(to_path)
 
     if not os.path.exists(dirname):
@@ -294,6 +332,9 @@ def copy_file(from_path: str, to_path: str):
     os.close(fd)
     os.rename(to_path + ".tmp", to_path)
     fsync_directory(dirname)
+
+    if sign:
+        sbctl_sign(to_path)
 
     paths[to_path] = True
 
@@ -376,6 +417,8 @@ def install_bootloader() -> None:
             return
         raise RuntimeError(f"ESP not mounted at {efi_mount}")
 
+    check_signing_prerequisites()
+
     # Exclusive lock prevents concurrent installs from corrupting ESP
     lock_path = os.path.join(efi_mount, '.refind-install.lock')
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
@@ -390,7 +433,11 @@ def install_bootloader() -> None:
     if not os.path.exists(refind_dir):
         os.makedirs(refind_dir)
     else:
+        # vars/ holds rEFInd's own runtime state (PreviousBoot, hidden tags
+        # when use_nvram is false) — never swept.
         for dir, dirs, files in os.walk(refind_dir, topdown=True):
+            if os.path.abspath(dir) == os.path.abspath(refind_dir):
+                dirs[:] = [d for d in dirs if d != 'vars']
             for file in files:
                 paths[os.path.join(dir, file)] = False
 
@@ -400,10 +447,12 @@ def install_bootloader() -> None:
             for file in files:
                 paths[os.path.join(dir, file)] = False
 
-    profiles = [('system', get_gens())]
-
-    for profile in get_profiles():
-        profiles += [(profile, get_gens(profile))]
+    if config('generateNixosEntries'):
+        profiles = [('system', get_gens())]
+        for profile in get_profiles():
+            profiles += [(profile, get_gens(profile))]
+    else:
+        profiles = []
 
     timeout = config('timeout')
 
@@ -497,7 +546,11 @@ def install_bootloader() -> None:
     for dest_rel, source_path in config('additionalFiles').items():
         dest_path = os.path.normpath(os.path.join(refind_dir, dest_rel))
         validate_path_within(dest_path, refind_dir)
-        copy_file(source_path, dest_path)
+        copy_file(
+            source_path,
+            dest_path,
+            sign=config('sign') is not None and dest_path.lower().endswith('.efi'),
+        )
 
     cpu_family = config('hostArchitecture', 'family')
     if cpu_family == 'x86':
@@ -522,16 +575,24 @@ def install_bootloader() -> None:
     # FIX #452075: EFI binary goes in same dir as config
     dest_path = os.path.join(refind_dir, boot_file if config('efiRemovable') else efi_file)
 
-    copy_file(efi_path, dest_path)
+    copy_file(efi_path, dest_path, sign=config('sign') is not None)
 
-    if not config('efiRemovable') and not config('canTouchEfiVariables'):
-        print(
-            'warning: canTouchEfiVariables is false and efiInstallAsRemovable is false.\n'
-            '  The system may be unbootable without a NVRAM entry or fallback bootloader.',
-            file=sys.stderr,
-        )
+    manage_nvram = config('manageNvram')
 
-    if config('canTouchEfiVariables'):
+    if not config('efiRemovable'):
+        if not manage_nvram:
+            print(
+                f'note: manageNvram is false — the NVRAM entry for \\efi\\refind\\{efi_file} '
+                'is not created or updated by this installer.'
+            )
+        elif not config('canTouchEfiVariables'):
+            print(
+                'warning: canTouchEfiVariables is false and efiInstallAsRemovable is false.\n'
+                '  The system may be unbootable without a NVRAM entry or fallback bootloader.',
+                file=sys.stderr,
+            )
+
+    if manage_nvram and config('canTouchEfiVariables'):
         if config('efiRemovable'):
             print('note: efiInstallAsRemovable is true, no need to add EFI NVRAM entry.')
         else:
@@ -542,7 +603,7 @@ def install_bootloader() -> None:
 
             try:
                 efibootmgr_output = subprocess.check_output(
-                    [efibootmgr], stderr=subprocess.STDOUT,
+                    [efibootmgr, '-v'], stderr=subprocess.STDOUT,
                     universal_newlines=True, timeout=SUBPROCESS_TIMEOUT,
                 )
             except subprocess.CalledProcessError as e:
@@ -553,9 +614,26 @@ def install_bootloader() -> None:
                 )
                 raise
 
+            # An entry is ours to replace only when it points at THIS ESP —
+            # a same-label entry on another disk is someone else's boot path.
+            esp_partuuid = find_partuuid(efi_partition)
             refind_boot_entry = None
-            if matches := re.findall(r'Boot([0-9a-fA-F]{4})\*? rEFInd', efibootmgr_output):
-                refind_boot_entry = matches[0]
+            foreign_entries = []
+            for line in efibootmgr_output.splitlines():
+                entry = re.match(r'Boot([0-9a-fA-F]{4})\*?\s+rEFInd\b', line)
+                if not entry:
+                    continue
+                if esp_partuuid is not None and esp_partuuid.lower() in line.lower():
+                    if refind_boot_entry is None:
+                        refind_boot_entry = entry.group(1)
+                else:
+                    foreign_entries.append(entry.group(1))
+
+            if foreign_entries:
+                print(
+                    'note: rEFInd boot entries not on this ESP are left untouched: '
+                    + ', '.join(foreign_entries)
+                )
 
             if refind_boot_entry:
                 boot_order_matches = re.findall(

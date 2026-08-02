@@ -3,4 +3,5 @@
 
 {
   minimal = callPackage ./minimal.nix { };
+  regular = callPackage ./regular.nix { };
 }
