@@ -21,14 +21,14 @@ Declarative rEFInd bootloader for NixOS — typed options, first-class theming, 
 
 ## Features
 
-- **22 typed NixOS options** for `refind.conf` directives (no raw `extraConfig` needed)
+- **Typed NixOS options** for `refind.conf` directives (no raw `extraConfig` needed)
 - **First-class theme support** — themes as Nix store derivations with `mkRefindTheme`
 - **12 security checks** — PE binary detection, image dimension limits, directive whitelist, symlink rejection, and more
 - **Typed multi-boot entries** — `extraEntries` submodule for Windows, macOS, Linux
 - **Bug fixes** — nixpkgs #452075 (efiRemovable path), #453812 (default_selection override)
 - **Safe ESP management** — fsync + directory fsync, atomic writes, orphan file cleanup, file locking
 - **initrdSecrets support** — bootspec RFC compliant, LUKS key injection into initrd
-- **15 flake checks** — eval tests, assertion tests, security unit tests
+- **Flake checks** — eval tests, assertion tests, security unit tests
 
 ## Quick Start
 
