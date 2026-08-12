@@ -178,7 +178,4 @@ Runtime validation runs during `nixos-rebuild switch` for themes not built with 
 MIT
 
 <!-- BEGIN generated:footer -->
----
-
-*Maintained as part of the [Daaboulex](https://github.com/Daaboulex) NixOS ecosystem.*
 <!-- END generated:footer -->
