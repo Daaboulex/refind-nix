@@ -23,10 +23,10 @@ let
       efiBootMgrPath = pkgs.efibootmgr;
       refindPath = cfg.package;
       efiMountPoint = efi.efiSysMountPoint;
-      canTouchEfiVariables = efi.canTouchEfiVariables;
+      inherit (efi) canTouchEfiVariables;
       efiRemovable = cfg.efiInstallAsRemovable;
-      manageNvram = cfg.manageNvram;
-      generateNixosEntries = cfg.generateNixosEntries;
+      inherit (cfg) manageNvram;
+      inherit (cfg) generateNixosEntries;
       sign =
         if cfg.secureBoot.enable then
           {
@@ -38,8 +38,8 @@ let
           null;
       maxGenerations = if cfg.maxGenerations == null then 0 else cfg.maxGenerations;
       hostArchitecture = pkgs.stdenv.hostPlatform.parsed.cpu;
-      timeout = cfg.timeout;
-      extraConfig = cfg.extraConfig;
+      inherit (cfg) timeout;
+      inherit (cfg) extraConfig;
       extraEntries = map (e: {
         inherit (e)
           name
@@ -66,20 +66,20 @@ let
           icon = if s.icon != null then toString s.icon else null;
         }) e.subEntries;
       }) cfg.extraEntries;
-      additionalFiles = cfg.additionalFiles;
-      defaultSelection = cfg.defaultSelection;
-      hideUI = cfg.hideUI;
-      showTools = cfg.showTools;
-      bannerScale = cfg.bannerScale;
-      textOnly = cfg.textOnly;
+      inherit (cfg) additionalFiles;
+      inherit (cfg) defaultSelection;
+      inherit (cfg) hideUI;
+      inherit (cfg) showTools;
+      inherit (cfg) bannerScale;
+      inherit (cfg) textOnly;
       theme = if cfg.theme != null then toString cfg.theme else null;
-      resolution = cfg.resolution;
-      scanfor = cfg.scanfor;
-      dontScanDirs = cfg.dontScanDirs;
-      useGraphicsFor = cfg.useGraphicsFor;
-      enableMouse = cfg.enableMouse;
-      enableTouch = cfg.enableTouch;
-      graceful = cfg.graceful;
+      inherit (cfg) resolution;
+      inherit (cfg) scanfor;
+      inherit (cfg) dontScanDirs;
+      inherit (cfg) useGraphicsFor;
+      inherit (cfg) enableMouse;
+      inherit (cfg) enableTouch;
+      inherit (cfg) graceful;
     }
   );
 
