@@ -42,7 +42,11 @@
             modules:
             nixpkgs.lib.nixosSystem {
               inherit system;
-              modules = [ self.nixosModules.default ] ++ modules;
+              modules = [
+                self.nixosModules.default
+                { system.stateVersion = nixpkgs.lib.trivial.release; }
+              ]
+              ++ modules;
             };
           minimalBase = {
             boot.loader.efi.canTouchEfiVariables = true;
