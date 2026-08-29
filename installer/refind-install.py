@@ -1,6 +1,6 @@
 #!@python3@/bin/python3 -B
 #
-# refind-install.py — extended nixpkgs rEFInd installer.
+# refind-install.py - extended nixpkgs rEFInd installer.
 # Base: nixpkgs/nixos/modules/system/boot/loader/refind/refind-install.py
 # Extensions: theme deployment, dont_scan_dirs, #452075 fix, #453812 fix, orphan scan,
 # sbctl signing (fail-closed), UKI-native mode, NVRAM opt-out, vars/ preservation.
@@ -105,6 +105,34 @@ def get_gens(profile: str = "system") -> list[int]:
 paths = {}
 
 
+def esp_uri(dest_path: str) -> str:
+    """rEFInd resolves a menuentry path from the volume root, never from its own directory."""
+    relative = os.path.relpath(dest_path, config("efiMountPoint"))
+    if relative.startswith(os.pardir):
+        raise RuntimeError(f"refind-install: {dest_path} is outside the ESP")
+    return "/" + relative.replace(os.sep, "/")
+
+
+def verify_generated_paths(entries: str, efi_mount: str) -> None:
+    """Fail before writing: rEFInd reads these from the ESP root, so they must exist there."""
+    missing = []
+    for line in entries.splitlines():
+        stripped = line.strip()
+        for keyword in ("loader ", "initrd "):
+            if not stripped.startswith(keyword):
+                continue
+            value = stripped[len(keyword) :].strip()
+            target = os.path.join(efi_mount, value.replace("\\", "/").lstrip("/"))
+            if not os.path.isfile(target):
+                missing.append(f"  {stripped}  ->  {target}")
+    if missing:
+        raise RuntimeError(
+            "refind-install: generated boot entries name files that do not exist at "
+            "the ESP root, so rEFInd would fail with 'Not Found':\n"
+            + "\n".join(missing)
+        )
+
+
 def get_copied_path_uri(path: str, target: str) -> str:
     package_id = os.path.basename(os.path.dirname(path))
     suffix = os.path.basename(path)
@@ -116,9 +144,7 @@ def get_copied_path_uri(path: str, target: str) -> str:
     else:
         paths[dest_path] = True
 
-    if target:
-        return os.path.join(target, dest_file)
-    return dest_file
+    return esp_uri(dest_path)
 
 
 def get_kernel_uri(kernel_path: str) -> str:
@@ -153,14 +179,8 @@ def bootjson_to_bootspec(bootjson: dict) -> BootSpec:
     )
 
 
-def config_entry(is_sub: bool, bootspec: BootSpec, label: str) -> str:
-    label = sanitize_refind_value(label)
-    entry = ""
-    if is_sub:
-        entry += "sub"
-
-    entry += f'menuentry "{label}" {{\n'
-    entry += "  loader " + get_kernel_uri(bootspec.kernel) + "\n"
+def entry_lines(bootspec: BootSpec, indent: str) -> str | None:
+    lines = indent + "loader " + get_kernel_uri(bootspec.kernel) + "\n"
 
     if bootspec.initrd:
         if bootspec.initrdSecrets:
@@ -169,7 +189,7 @@ def config_entry(is_sub: bool, bootspec: BootSpec, label: str) -> str:
                     f"error: initrdSecrets path outside Nix store: {bootspec.initrdSecrets}",
                     file=sys.stderr,
                 )
-                return ""
+                return None
             initrd_dest = get_kernel_dest_path(bootspec.initrd)
             copy_file(bootspec.initrd, initrd_dest)
             try:
@@ -180,19 +200,31 @@ def config_entry(is_sub: bool, bootspec: BootSpec, label: str) -> str:
                 )
             except subprocess.CalledProcessError:
                 print("warning: initrdSecrets failed for entry", file=sys.stderr)
-                return ""
-            initrd_uri = os.path.join("kernels", os.path.basename(initrd_dest))
+                return None
+            initrd_uri = esp_uri(initrd_dest)
         else:
             initrd_uri = get_kernel_uri(bootspec.initrd)
-        entry += "  initrd " + initrd_uri + "\n"
+        lines += indent + "initrd " + initrd_uri + "\n"
 
     safe_init = sanitize_refind_value(bootspec.init)
     safe_params = [sanitize_refind_value(p) for p in bootspec.kernelParams]
-    entry += (
-        '  options "' + " ".join(["init=" + safe_init, *safe_params]).strip() + '"\n'
+    lines += (
+        indent
+        + 'options "'
+        + " ".join(["init=" + safe_init, *safe_params]).strip()
+        + '"\n'
     )
-    entry += "}\n"
-    return entry
+    return lines
+
+
+def config_entry(is_sub: bool, bootspec: BootSpec, label: str) -> str:
+    label = sanitize_refind_value(label)
+    outer = "  " if is_sub else ""
+    body = entry_lines(bootspec, outer + "  ")
+    if body is None:
+        return ""
+    keyword = "submenuentry" if is_sub else "menuentry"
+    return f'{outer}{keyword} "{label}" {{\n{body}{outer}}}\n'
 
 
 def generate_config_entry(profile: str, gen: int, group_name: str) -> str:
@@ -210,18 +242,18 @@ def generate_config_entry(profile: str, gen: int, group_name: str) -> str:
     entry = ""
 
     if len(specialisation_list) > 0:
-        default_entry = config_entry(True, boot_spec, "Default")
+        default_lines = entry_lines(boot_spec, "  ")
+        if default_lines is None:
+            print(f"warning: default entry for generation {gen} failed, skipping")
+            return ""
+
         spec_entries = ""
         for spec, spec_boot_spec in specialisation_list:
             spec_entries += config_entry(True, spec_boot_spec, spec)
 
-        if not default_entry and not spec_entries:
-            print(f"warning: all entries for generation {gen} failed, skipping")
-            return ""
-
         safe_group = sanitize_refind_value(group_name)
         entry += f'menuentry "NixOS {safe_group} Generation {gen}" {{\n'
-        entry += default_entry
+        entry += default_lines
         entry += spec_entries
         entry += "}\n"
     else:
@@ -237,17 +269,17 @@ def generate_extra_entries() -> str:
             continue
         name = sanitize_refind_value(entry["name"])
         result += f'menuentry "{name}" {{\n'
-        result += f"  loader {entry['loader']}\n"
+        result += f"  loader {sanitize_refind_value(entry['loader'])}\n"
         if entry.get("volume"):
-            result += f"  volume {entry['volume']}\n"
+            result += f"  volume {sanitize_refind_value(entry['volume'])}\n"
         if entry.get("icon"):
-            result += f"  icon {entry['icon']}\n"
+            result += f"  icon {sanitize_refind_value(entry['icon'])}\n"
         if entry.get("ostype"):
-            result += f"  ostype {entry['ostype']}\n"
+            result += f"  ostype {sanitize_refind_value(entry['ostype'])}\n"
         if entry.get("graphics") is not None:
             result += f"  graphics {'on' if entry['graphics'] else 'off'}\n"
         if entry.get("initrd"):
-            result += f"  initrd {entry['initrd']}\n"
+            result += f"  initrd {sanitize_refind_value(entry['initrd'])}\n"
         if entry.get("options"):
             result += f'  options "{sanitize_refind_value(entry["options"])}"\n'
         for sub in entry.get("subEntries", []):
@@ -256,9 +288,9 @@ def generate_extra_entries() -> str:
             sub_name = sanitize_refind_value(sub["name"])
             result += f'  submenuentry "{sub_name}" {{\n'
             if sub.get("loader"):
-                result += f"    loader {sub['loader']}\n"
+                result += f"    loader {sanitize_refind_value(sub['loader'])}\n"
             if sub.get("initrd"):
-                result += f"    initrd {sub['initrd']}\n"
+                result += f"    initrd {sanitize_refind_value(sub['initrd'])}\n"
             if sub.get("options"):
                 result += f'    options "{sanitize_refind_value(sub["options"])}"\n'
             result += "  }\n"
@@ -452,7 +484,7 @@ def install_bootloader() -> None:
         os.makedirs(refind_dir)
     else:
         # vars/ holds rEFInd's own runtime state (PreviousBoot, hidden tags
-        # when use_nvram is false) — never swept.
+        # when use_nvram is false) - never swept.
         for dir, dirs, files in os.walk(refind_dir, topdown=True):
             if os.path.abspath(dir) == os.path.abspath(refind_dir):
                 dirs[:] = [d for d in dirs if d != "vars"]
@@ -479,12 +511,12 @@ def install_bootloader() -> None:
         install_theme(theme)
 
     extra_config = str(config("extraConfig")).strip()
-    config_file = "# refind.conf — generated by refind-nix\n"
+    config_file = "# refind.conf - generated by refind-nix\n"
 
     if extra_config:
         config_file += extra_config + "\n\n"
 
-    # Theme include BEFORE module directives — theme provides defaults, options override
+    # Theme include BEFORE module directives - theme provides defaults, options override
     if theme:
         config_file += "include themes/active/theme.conf\n\n"
 
@@ -526,7 +558,7 @@ def install_bootloader() -> None:
 
     dont_scan_dirs = config("dontScanDirs")
     if dont_scan_dirs:
-        config_file += f"dont_scan_dirs {','.join(dont_scan_dirs)}\n"
+        config_file += f"dont_scan_dirs +,{','.join(dont_scan_dirs)}\n"
 
     # FIX #453812: only write default_selection if explicitly set
     default_selection = config("defaultSelection")
@@ -535,14 +567,16 @@ def install_bootloader() -> None:
 
     config_file += "\n# NixOS boot entries start here\n"
 
+    generated_entries = ""
     for profile, gens in profiles:
         group_name = (
             "default profile" if profile == "system" else f"profile '{profile}'"
         )
 
         for gen in sorted(gens, key=lambda x: x, reverse=True):
-            config_file += generate_config_entry(profile, gen, group_name)
+            generated_entries += generate_config_entry(profile, gen, group_name)
 
+    config_file += generated_entries
     config_file += "\n# NixOS boot entries end here\n"
 
     extra = generate_extra_entries()
@@ -550,12 +584,23 @@ def install_bootloader() -> None:
         config_file += "\n# Manual boot entries\n"
         config_file += extra
 
+    verify_generated_paths(generated_entries, efi_mount)
+
     config_file_path = os.path.join(refind_dir, "refind.conf")
     config_content = config_file.strip()
 
-    with open(f"{config_file_path}.tmp", "w") as file:
+    try:
+        config_bytes = config_content.encode("ascii")
+    except UnicodeEncodeError as e:
+        context = config_content[max(0, e.start - 40) : e.start + 40]
+        raise RuntimeError(
+            "refind-install: refind.conf must be ASCII; rEFInd widens config bytes "
+            f"straight to UTF-16 and would render this as garbage: {context!r}"
+        ) from None
+
+    with open(f"{config_file_path}.tmp", "wb") as file:
         file.truncate()
-        file.write(config_content)
+        file.write(config_bytes)
         file.flush()
         os.fsync(file.fileno())
     os.rename(f"{config_file_path}.tmp", config_file_path)
@@ -611,7 +656,7 @@ def install_bootloader() -> None:
     if not config("efiRemovable"):
         if not manage_nvram:
             print(
-                f"note: manageNvram is false — the NVRAM entry for \\efi\\refind\\{efi_file} "
+                f"note: manageNvram is false - the NVRAM entry for \\efi\\refind\\{efi_file} "
                 "is not created or updated by this installer."
             )
         elif not config("canTouchEfiVariables"):
@@ -649,7 +694,7 @@ def install_bootloader() -> None:
                 )
                 raise
 
-            # An entry is ours to replace only when it points at THIS ESP —
+            # An entry is ours to replace only when it points at THIS ESP -
             # a same-label entry on another disk is someone else's boot path.
             esp_partuuid = find_partuuid(efi_partition)
             refind_boot_entry = None
@@ -676,7 +721,7 @@ def install_bootloader() -> None:
                 )
                 boot_order = boot_order_matches[0] if boot_order_matches else None
 
-                # Create new entry first — old entry remains as fallback if this fails
+                # Create new entry first - old entry remains as fallback if this fails
                 create_output = subprocess.check_output(
                     [
                         efibootmgr,
@@ -700,7 +745,7 @@ def install_bootloader() -> None:
                 )
                 new_boot_num = new_matches[-1] if new_matches else None
 
-                # Delete old entry (non-fatal — two entries is ugly but bootable)
+                # Delete old entry (non-fatal - two entries is ugly but bootable)
                 try:
                     subprocess.check_output(
                         [

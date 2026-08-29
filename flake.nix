@@ -406,6 +406,119 @@
                 touch $out
               '';
 
+            installer-entry-paths-resolve-from-esp-root =
+              let
+                driver = pkgs.writeText "refind-entry-path-check.py" ''
+                  import importlib.util
+                  import json
+                  import os
+                  import sys
+                  import tempfile
+
+                  spec = importlib.util.spec_from_file_location("refind_install", sys.argv[1])
+                  mod = importlib.util.module_from_spec(spec)
+                  spec.loader.exec_module(mod)
+
+                  root = tempfile.mkdtemp()
+                  esp = os.path.join(root, "esp")
+                  refind_dir = os.path.join(esp, "efi", "boot")
+                  os.makedirs(os.path.join(refind_dir, "kernels"))
+
+                  def fake_store_file(package_id, filename):
+                      d = os.path.join(root, "store", package_id)
+                      os.makedirs(d, exist_ok=True)
+                      p = os.path.join(d, filename)
+                      with open(p, "wb") as handle:
+                          handle.write(b"MZ")
+                      return p
+
+                  kernel = fake_store_file("aaaa-linux-1.2.3", "bzImage")
+                  initrd = fake_store_file("bbbb-initrd-linux-1.2.3", "initrd")
+
+                  def bootspec(toplevel):
+                      return {
+                          "system": "x86_64-linux",
+                          "init": toplevel + "/init",
+                          "kernel": kernel,
+                          "kernelParams": ["quiet"],
+                          "label": "NixOS test",
+                          "toplevel": toplevel,
+                          "initrd": initrd,
+                      }
+
+                  plain = {
+                      "org.nixos.bootspec.v1": bootspec("/nix/store/tttt-system"),
+                      "org.nixos.specialisation.v1": {},
+                  }
+                  withspec = {
+                      "org.nixos.bootspec.v1": bootspec("/nix/store/tttt-system"),
+                      "org.nixos.specialisation.v1": {
+                          "tiny": {
+                              "org.nixos.bootspec.v1": bootspec("/nix/store/uuuu-system"),
+                              "org.nixos.specialisation.v1": {},
+                          }
+                      },
+                  }
+
+                  profiles = os.path.join(root, "profiles")
+                  for gen, data in ((1, plain), (2, withspec)):
+                      d = os.path.join(profiles, "system-" + str(gen) + "-link")
+                      os.makedirs(d)
+                      with open(os.path.join(d, "boot.json"), "w") as handle:
+                          json.dump(data, handle)
+
+                  mod.install_config = {"efiMountPoint": esp, "maxGenerations": 0}
+                  mod.refind_dir = refind_dir
+                  mod.get_system_path = lambda profile="system", gen=None, spec=None: os.path.join(
+                      profiles, "system-" + str(gen) + "-link"
+                  )
+
+                  plain_text = mod.generate_config_entry("system", 1, "default profile")
+                  spec_text = mod.generate_config_entry("system", 2, "default profile")
+                  both = plain_text + spec_text
+                  failures = []
+
+                  for line in both.splitlines():
+                      stripped = line.strip()
+                      for keyword in ("loader ", "initrd "):
+                          if stripped.startswith(keyword):
+                              value = stripped[len(keyword) :]
+                              if not value.startswith("/efi/boot/kernels/"):
+                                  failures.append("not ESP-root absolute: " + stripped)
+
+                  mod.verify_generated_paths(both, esp)
+
+                  try:
+                      mod.verify_generated_paths(both.replace("/efi/boot/kernels/", "kernels/"), esp)
+                      failures.append("verify_generated_paths accepted a path rEFInd cannot resolve")
+                  except RuntimeError:
+                      pass
+
+                  head = spec_text.split("submenuentry")[0]
+                  if "submenuentry" not in spec_text:
+                      failures.append("a specialisation produced no submenuentry")
+                  if "loader " not in head:
+                      failures.append("the specialisation wrapper has no top-level loader")
+                  if "options " not in head:
+                      failures.append("the specialisation wrapper has no top-level options")
+
+                  if failures:
+                      print(both)
+                      for message in failures:
+                          print("FAIL: " + message)
+                      sys.exit(1)
+                  print(both)
+                '';
+              in
+              pkgs.runCommand "installer-entry-paths-resolve-from-esp-root"
+                {
+                  nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.psutil ])) ];
+                }
+                ''
+                  python3 ${driver} ${./installer/refind-install.py}
+                  touch $out
+                '';
+
             security-rejects-pe =
               let
                 badSrc = themePkgs.runCommand "bad-theme-pe" { } ''

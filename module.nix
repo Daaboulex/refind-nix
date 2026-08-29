@@ -324,20 +324,20 @@ in
         lib.types.submodule {
           options = {
             name = lib.mkOption {
-              type = lib.types.str;
+              type = lib.types.strMatching "[^\n\r]+";
               description = "Menu entry label displayed in rEFInd.";
             };
             loader = lib.mkOption {
-              type = lib.types.str;
+              type = lib.types.strMatching "[^\n\r]+";
               description = "EFI binary path (e.g. \\EFI\\Microsoft\\Boot\\bootmgfw.efi).";
             };
             initrd = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
+              type = lib.types.nullOr (lib.types.strMatching "[^\n\r]+");
               default = null;
               description = "initrd path on the ESP. null = omit.";
             };
             options = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
+              type = lib.types.nullOr (lib.types.strMatching "[^\n\r]+");
               default = null;
               description = "Kernel/loader options string. null = omit.";
             };
@@ -347,7 +347,7 @@ in
               description = "Path to icon file in the Nix store. null = omit.";
             };
             volume = lib.mkOption {
-              type = lib.types.nullOr lib.types.str;
+              type = lib.types.nullOr (lib.types.strMatching "[^\n\r]+");
               default = null;
               description = "Volume label or GUID for the loader. null = omit.";
             };
@@ -377,20 +377,20 @@ in
                 lib.types.submodule {
                   options = {
                     name = lib.mkOption {
-                      type = lib.types.str;
+                      type = lib.types.strMatching "[^\n\r]+";
                       description = "Submenu entry label.";
                     };
                     loader = lib.mkOption {
-                      type = lib.types.str;
+                      type = lib.types.strMatching "[^\n\r]+";
                       description = "EFI binary path for this submenu entry.";
                     };
                     initrd = lib.mkOption {
-                      type = lib.types.nullOr lib.types.str;
+                      type = lib.types.nullOr (lib.types.strMatching "[^\n\r]+");
                       default = null;
                       description = "initrd path for this submenu entry. null = omit.";
                     };
                     options = lib.mkOption {
-                      type = lib.types.nullOr lib.types.str;
+                      type = lib.types.nullOr (lib.types.strMatching "[^\n\r]+");
                       default = null;
                       description = "Options string for this submenu entry. null = omit.";
                     };
@@ -400,7 +400,7 @@ in
                       description = "Icon path for this submenu entry. null = omit.";
                     };
                     volume = lib.mkOption {
-                      type = lib.types.nullOr lib.types.str;
+                      type = lib.types.nullOr (lib.types.strMatching "[^\n\r]+");
                       default = null;
                       description = "Volume for this submenu entry. null = omit.";
                     };
