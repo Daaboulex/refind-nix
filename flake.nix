@@ -467,7 +467,12 @@
                       with open(os.path.join(d, "boot.json"), "w") as handle:
                           json.dump(data, handle)
 
-                  mod.install_config = {"efiMountPoint": esp, "maxGenerations": 0}
+                  mod.install_config = {
+                      "efiMountPoint": esp,
+                      "maxGenerations": 0,
+                      "shareSystemdBootKernels": False,
+                      "storeDir": os.path.join(root, "store"),
+                  }
                   mod.refind_dir = refind_dir
                   mod.get_system_path = lambda profile="system", gen=None, spec=None: os.path.join(
                       profiles, "system-" + str(gen) + "-link"
@@ -502,12 +507,52 @@
                   if "options " not in head:
                       failures.append("the specialisation wrapper has no top-level options")
 
+                  # sharing systemd-boot's copies must point into its directory
+                  # and must not leave a second copy behind
+                  shared_esp = os.path.join(root, "shared")
+                  shared_dir = os.path.join(shared_esp, "efi", "boot")
+                  os.makedirs(os.path.join(shared_esp, "EFI", "nixos"))
+                  for source in (kernel, initrd):
+                      package_id = os.path.basename(os.path.dirname(source))
+                      name = package_id + "-" + os.path.basename(source) + ".efi"
+                      with open(os.path.join(shared_esp, "EFI", "nixos", name), "wb") as handle:
+                          handle.write(b"MZ")
+                  os.makedirs(shared_dir)
+                  mod.install_config["efiMountPoint"] = shared_esp
+                  mod.install_config["shareSystemdBootKernels"] = True
+                  mod.refind_dir = shared_dir
+                  shared_text = mod.generate_config_entry("system", 1, "default profile")
+                  mod.verify_generated_paths(shared_text, shared_esp)
+                  for line in shared_text.splitlines():
+                      stripped = line.strip()
+                      for keyword in ("loader ", "initrd "):
+                          if stripped.startswith(keyword):
+                              value = stripped[len(keyword) :]
+                              if not value.startswith("/EFI/nixos/"):
+                                  failures.append("shared entry not in systemd-boot's dir: " + stripped)
+                  if os.path.exists(os.path.join(shared_dir, "kernels")):
+                      failures.append("sharing systemd-boot kernels still copied a second set")
+
+                  # a theme must not carry UI policy the module owns, because
+                  # rEFInd ORs hideui flags and they could never be turned off
+                  theme_conf = os.path.join(root, "theme.conf")
+                  with open(theme_conf, "wb") as handle:
+                      handle.write(b"hideui label\nbanner themes/active/bg.png\nshowtools about\n")
+                  mod.strip_theme_ui_directives(theme_conf)
+                  after = open(theme_conf, "rb").read()
+                  if b"hideui" in after or b"showtools" in after:
+                      failures.append("theme.conf kept a UI directive the module owns")
+                  if b"banner" not in after:
+                      failures.append("theme.conf lost a directive that is not the module's")
+
                   if failures:
                       print(both)
+                      print(shared_text)
                       for message in failures:
                           print("FAIL: " + message)
                       sys.exit(1)
                   print(both)
+                  print(shared_text)
                 '';
               in
               pkgs.runCommand "installer-entry-paths-resolve-from-esp-root"

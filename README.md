@@ -84,6 +84,24 @@ Switching bootloaders is safe when done carefully:
 
 **For Apple hardware**: set `efiInstallAsRemovable = true` — Apple firmware is unreliable with custom NVRAM entries. This installs to the firmware fallback path which always works.
 
+## Sharing one set of kernels with systemd-boot
+
+Running both boot loaders normally means two copies of every kernel and initrd on the ESP.
+`shareSystemdBootKernels` points rEFInd's generation entries at the copies systemd-boot already
+wrote to `/EFI/nixos`, so only one set exists:
+
+```nix
+boot.loader.refind = {
+  allowCoexistWithSystemdBoot = true;
+  shareSystemdBootKernels = true;
+  maxGenerations = 3;                       # must not exceed configurationLimit
+  extraDontScanDirs = [ "EFI/systemd" ];    # you already chainload it via extraEntries
+};
+```
+
+The installer refuses to write `refind.conf` if any generated path does not resolve, so a change
+to the naming systemd-boot uses surfaces at `nixos-rebuild switch` rather than at boot.
+
 ## Multi-Boot
 
 rEFInd auto-discovers other operating systems on all drives. For explicit control, define manual boot entries:
@@ -120,6 +138,12 @@ boot.loader.refind.theme = pkgs.mkRefindTheme {
 
 12 security checks run automatically at build time. Themes using JPEG or ICNS images must convert to PNG.
 
+rEFInd's own `icons/` and `fonts/` are installed next to the binary whatever theme you pick.
+Without them rEFInd finds no icons directory and forces `textonly`, and any icon a theme omits
+has nothing to fall back to. A theme's own `hideui` and `showtools` lines are dropped on the way
+to the ESP: rEFInd combines `hideui` flags with OR, so a theme hiding entry labels could never be
+overridden by `hideUI`. Those two options are the module's to set.
+
 ## Options
 
 | Option | Type | Default | Description |
@@ -138,6 +162,8 @@ boot.loader.refind.theme = pkgs.mkRefindTheme {
 | `textOnly` | bool | false | Text-only mode |
 | `scanfor` | list of enum | [] | Boot entry types to scan for |
 | `dontScanDirs` | list of str | [EFI/nixos ...] | Dirs to exclude from scanning |
+| `extraDontScanDirs` | list of str | [] | Dirs appended to `dontScanDirs`, keeping its default |
+| `shareSystemdBootKernels` | bool | false | Reuse systemd-boot's kernels in `/EFI/nixos` instead of copying |
 | `useGraphicsFor` | list of enum | [] | OS types to boot in graphics mode |
 | `enableMouse` | bool | false | Enable mouse support |
 | `enableTouch` | bool | false | Enable touchscreen support |

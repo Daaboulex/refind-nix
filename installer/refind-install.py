@@ -22,6 +22,9 @@ import psutil
 
 SUBPROCESS_TIMEOUT = 30
 
+# Hardcoded in nixpkgs' systemd-boot module, not an option there.
+SYSTEMD_BOOT_NIXOS_DIR = "/EFI/nixos"
+
 libc_name = ctypes.util.find_library("c")
 if not libc_name:
     libc_name = "libc.so.6"
@@ -133,6 +136,22 @@ def verify_generated_paths(entries: str, efi_mount: str) -> None:
         )
 
 
+def systemd_boot_uri(store_path: str) -> str:
+    """The ESP path nixpkgs' systemd-boot builder gives this store file (its boot_path())."""
+    store_dir = str(config("storeDir"))
+    resolved = os.path.realpath(store_path)
+    relative = os.path.relpath(resolved, store_dir)
+    if relative.startswith(os.pardir) or os.path.isabs(relative):
+        raise RuntimeError(
+            f"refind-install: {store_path} is not under {store_dir}, so systemd-boot "
+            "did not copy it to the ESP and its entry cannot point there"
+        )
+    suffix = os.path.basename(resolved)
+    store_subdir = relative.split(os.sep)[0]
+    name = f"{suffix}.efi" if suffix == store_subdir else f"{store_subdir}-{suffix}.efi"
+    return f"{SYSTEMD_BOOT_NIXOS_DIR}/{name}"
+
+
 def get_copied_path_uri(path: str, target: str) -> str:
     package_id = os.path.basename(os.path.dirname(path))
     suffix = os.path.basename(path)
@@ -148,6 +167,8 @@ def get_copied_path_uri(path: str, target: str) -> str:
 
 
 def get_kernel_uri(kernel_path: str) -> str:
+    if config("shareSystemdBootKernels"):
+        return systemd_boot_uri(kernel_path)
     return get_copied_path_uri(kernel_path, "kernels")
 
 
@@ -388,6 +409,20 @@ def copy_file(from_path: str, to_path: str, sign: bool = False):
     paths[to_path] = True
 
 
+def install_stock_assets() -> None:
+    """rEFInd forces textonly when no icons directory sits beside its binary."""
+    for name in ("icons", "fonts"):
+        source = os.path.join(str(config("refindPath")), "share", "refind", name)
+        if not os.path.isdir(source):
+            continue
+        dest = os.path.join(refind_dir, name)
+        shutil.copytree(source, dest, dirs_exist_ok=True, copy_function=shutil.copyfile)
+        for dirpath, _, filenames in os.walk(dest):
+            for f in filenames:
+                paths[os.path.join(dirpath, f)] = True
+        fsync_directory(dest)
+
+
 def validate_theme(theme_dir: str) -> None:
     """Runtime safety checks for themes not built with mkRefindTheme."""
     for dirpath, _, filenames in os.walk(theme_dir):
@@ -410,6 +445,23 @@ def validate_theme(theme_dir: str) -> None:
                 raise RuntimeError(f"theme file exceeds 5MB: {full}")
 
 
+def strip_theme_ui_directives(theme_conf: str) -> None:
+    """rEFInd ORs hideui flags, so a theme's own hideui could never be overridden."""
+    if not os.path.isfile(theme_conf):
+        return
+    with open(theme_conf, "rb") as handle:
+        lines = handle.read().splitlines()
+    kept = [
+        line
+        for line in lines
+        if not re.match(rb"\s*(hideui|showtools)\b", line, re.IGNORECASE)
+    ]
+    if len(kept) == len(lines):
+        return
+    with open(theme_conf, "wb") as handle:
+        handle.write(b"\n".join(kept) + b"\n")
+
+
 def install_theme(theme_store_path: str) -> None:
     validate_theme(theme_store_path)
     themes_dir = os.path.join(refind_dir, "themes")
@@ -424,6 +476,7 @@ def install_theme(theme_store_path: str) -> None:
         shutil.rmtree(active_new)
 
     shutil.copytree(theme_store_path, active_new)
+    strip_theme_ui_directives(os.path.join(active_new, "theme.conf"))
 
     for dirpath, _, filenames in os.walk(active_new):
         for f in filenames:
@@ -506,6 +559,8 @@ def install_bootloader() -> None:
 
     timeout = config("timeout")
 
+    install_stock_assets()
+
     theme = config("theme")
     if theme:
         install_theme(theme)
@@ -556,7 +611,7 @@ def install_bootloader() -> None:
     if config("enableTouch"):
         config_file += "enable_touch\n"
 
-    dont_scan_dirs = config("dontScanDirs")
+    dont_scan_dirs = list(config("dontScanDirs")) + list(config("extraDontScanDirs"))
     if dont_scan_dirs:
         config_file += f"dont_scan_dirs +,{','.join(dont_scan_dirs)}\n"
 

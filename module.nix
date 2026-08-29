@@ -27,6 +27,8 @@ let
       efiRemovable = cfg.efiInstallAsRemovable;
       inherit (cfg) manageNvram;
       inherit (cfg) generateNixosEntries;
+      inherit (cfg) shareSystemdBootKernels;
+      inherit (builtins) storeDir;
       sign =
         if cfg.secureBoot.enable then
           {
@@ -76,6 +78,7 @@ let
       inherit (cfg) resolution;
       inherit (cfg) scanfor;
       inherit (cfg) dontScanDirs;
+      inherit (cfg) extraDontScanDirs;
       inherit (cfg) useGraphicsFor;
       inherit (cfg) enableMouse;
       inherit (cfg) enableTouch;
@@ -133,6 +136,25 @@ in
         and — under Secure Boot — unsigned and unbootable. rEFInd then
         installs only its binary, config and theme; existing copied kernels
         are removed on the next install.
+      '';
+    };
+
+    shareSystemdBootKernels = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Point the generated menu entries at the kernels systemd-boot already
+        copied to `/EFI/nixos`, instead of keeping a second copy of every
+        kernel and initrd under rEFInd's own directory.
+
+        Halves ESP use when both boot loaders are installed. Requires
+        `allowCoexistWithSystemdBoot`, because rEFInd's installer runs after
+        systemd-boot's and reads what it wrote. The install fails if a path
+        does not resolve, so a change to the naming scheme upstream surfaces
+        at `nixos-rebuild switch` rather than at boot.
+
+        Generations with `boot.initrd.secrets` still get their own initrd
+        copy, since that file is modified after it is written.
       '';
     };
 
@@ -287,6 +309,18 @@ in
       );
       defaultText = lib.literalExpression ''[ "EFI/nixos" ] ++ lib.optional generateNixosEntries (if efiInstallAsRemovable then "efi/boot/kernels" else "efi/refind/kernels")'';
       description = "Directories to exclude from boot entry scanning.";
+    };
+
+    extraDontScanDirs = lib.mkOption {
+      type = lib.types.listOf (lib.types.strMatching "[^\n\r,]+");
+      default = [ ];
+      example = [ "EFI/systemd" ];
+      description = ''
+        Directories appended to `dontScanDirs`, keeping its computed default.
+
+        Use this to hide a loader you already reach through `extraEntries`;
+        rEFInd otherwise finds it by scanning and lists it a second time.
+      '';
     };
 
     useGraphicsFor = lib.mkOption {
@@ -547,6 +581,39 @@ in
               `boot.loader.refind.allowCoexistWithExternalInstaller = true`
               so rEFInd installs after it instead of fighting it for
               `boot.loader.external.installHook`.
+            '';
+          }
+          {
+            assertion = !cfg.shareSystemdBootKernels || cfg.allowCoexistWithSystemdBoot;
+            message = ''
+              refind-nix: shareSystemdBootKernels needs
+              `allowCoexistWithSystemdBoot`, because it reuses the kernels
+              systemd-boot copies to /EFI/nixos and only that mode guarantees
+              systemd-boot's installer runs first.
+            '';
+          }
+          {
+            assertion = !cfg.shareSystemdBootKernels || cfg.generateNixosEntries;
+            message = "refind-nix: shareSystemdBootKernels only affects generated NixOS entries, so generateNixosEntries must stay true.";
+          }
+          {
+            assertion =
+              !cfg.shareSystemdBootKernels || config.boot.loader.systemd-boot.xbootldrMountPoint == null;
+            message = "refind-nix: shareSystemdBootKernels cannot be used with an XBOOTLDR partition -- systemd-boot puts the kernels there, not on the ESP rEFInd boots from.";
+          }
+          {
+            assertion =
+              !cfg.shareSystemdBootKernels
+              || (
+                cfg.maxGenerations != null
+                && cfg.maxGenerations <= config.boot.loader.systemd-boot.configurationLimit
+              );
+            message = ''
+              refind-nix: shareSystemdBootKernels needs maxGenerations set and
+              no larger than boot.loader.systemd-boot.configurationLimit
+              (${toString config.boot.loader.systemd-boot.configurationLimit}),
+              or rEFInd would list generations whose kernels systemd-boot has
+              already pruned.
             '';
           }
           {
