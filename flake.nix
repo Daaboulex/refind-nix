@@ -545,6 +545,18 @@
                   if b"banner" not in after:
                       failures.append("theme.conf lost a directive that is not the module's")
 
+                  # turning kernel copies off must leave no trace of them
+                  leftovers = os.path.join(root, "leftovers")
+                  os.makedirs(os.path.join(leftovers, "kernels", "nested"))
+                  os.makedirs(os.path.join(leftovers, "themes", "active"))
+                  with open(os.path.join(leftovers, "themes", "active", "theme.conf"), "wb") as handle:
+                      handle.write(b"banner x.png\n")
+                  mod.prune_empty_managed_dirs(leftovers)
+                  if os.path.exists(os.path.join(leftovers, "kernels")):
+                      failures.append("an emptied kernels directory was left on the ESP")
+                  if not os.path.exists(os.path.join(leftovers, "themes", "active")):
+                      failures.append("a directory that still holds files was pruned")
+
                   if failures:
                       print(both)
                       print(shared_text)

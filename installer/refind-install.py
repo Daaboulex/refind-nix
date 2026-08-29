@@ -25,6 +25,8 @@ SUBPROCESS_TIMEOUT = 30
 # Hardcoded in nixpkgs' systemd-boot module, not an option there.
 SYSTEMD_BOOT_NIXOS_DIR = "/EFI/nixos"
 
+MANAGED_SUBDIRS = ("kernels", "themes", "icons", "fonts")
+
 libc_name = ctypes.util.find_library("c")
 if not libc_name:
     libc_name = "libc.so.6"
@@ -407,6 +409,17 @@ def copy_file(from_path: str, to_path: str, sign: bool = False):
         sbctl_sign(to_path)
 
     paths[to_path] = True
+
+
+def prune_empty_managed_dirs(directory: str) -> None:
+    """A directory this installer stopped filling is state: leave no trace of it."""
+    for subdir in MANAGED_SUBDIRS:
+        scan_dir = os.path.join(directory, subdir)
+        if not os.path.isdir(scan_dir):
+            continue
+        for dirpath, _, _ in os.walk(scan_dir, topdown=False):
+            if not os.listdir(dirpath):
+                os.rmdir(dirpath)
 
 
 def install_stock_assets() -> None:
@@ -864,7 +877,7 @@ def install_bootloader() -> None:
                 os.remove(path)
 
     # Orphan scan restricted to managed subdirectories only
-    for subdir in ["kernels", "themes"]:
+    for subdir in MANAGED_SUBDIRS:
         scan_dir = os.path.join(refind_dir, subdir)
         if not os.path.exists(scan_dir):
             continue
@@ -874,6 +887,9 @@ def install_bootloader() -> None:
                 if full not in paths and not f.startswith("."):
                     print(f"removing orphaned file: {full}")
                     os.remove(full)
+
+    prune_empty_managed_dirs(refind_dir)
+    fsync_directory(refind_dir)
 
 
 def main() -> None:
