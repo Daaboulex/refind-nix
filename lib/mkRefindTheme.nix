@@ -65,20 +65,23 @@ stdenvNoCC.mkDerivation {
     # SECURITY 2: reject .efi extensions (case-insensitive for FAT32).
     # Scan the SOURCE, not the whitelisted $out — a .efi outside the install
     # whitelist would otherwise be filtered out and never rejected.
-    if find "$srcDir" -iname '*.efi' | grep -q .; then
+    efiFiles=$(find "$srcDir" -iname '*.efi' || true)
+    if grep -q . <<<"$efiFiles"; then
       echo "SECURITY: EFI file extension in theme" >&2
       exit 1
     fi
 
     # SECURITY 3: size limits on ALL image types (LogoFAIL mitigation)
-    if find $out \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.bmp' -o -name '*.icns' \) -size +5M | grep -q .; then
+    oversizedImages=$(find $out \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.bmp' -o -name '*.icns' \) -size +5M || true)
+    if grep -q . <<<"$oversizedImages"; then
       echo "SECURITY: image file > 5MB detected" >&2
       exit 1
     fi
 
     # SECURITY 4: icons/ extension whitelist — only .png and .bmp
     if [ -d "$out/icons" ]; then
-      if find "$out/icons" -type f ! \( -name '*.png' -o -name '*.bmp' \) | grep -q .; then
+      iconNonImageFiles=$(find "$out/icons" -type f ! \( -name '*.png' -o -name '*.bmp' \) || true)
+      if grep -q . <<<"$iconNonImageFiles"; then
         echo "SECURITY: non-image file in icons/" >&2
         exit 1
       fi
@@ -86,14 +89,16 @@ stdenvNoCC.mkDerivation {
 
     # SECURITY 5: reject symlinks. Scan the SOURCE, not the whitelisted $out —
     # a symlink outside the install whitelist would otherwise be filtered out.
-    if find "$srcDir" -type l | grep -q .; then
+    srcSymlinks=$(find "$srcDir" -type l || true)
+    if grep -q . <<<"$srcSymlinks"; then
       echo "SECURITY: symlink in theme" >&2
       exit 1
     fi
 
     # SECURITY 6: theme.conf directive whitelist
     ALLOWED='banner|banner_scale|icons_dir|selection_big|selection_small|font|hideui|showtools|textonly|use_graphics_for|big_icon_size|small_icon_size|icon_delay|resolution'
-    if grep -vE "^\s*$|^\s*#|^\s*(''${ALLOWED})\b" "$out/theme.conf" | grep -q .; then
+    unknownDirectives=$(grep -vE "^\s*$|^\s*#|^\s*(''${ALLOWED})\b" "$out/theme.conf" || true)
+    if grep -q . <<<"$unknownDirectives"; then
       echo "SECURITY: unknown directive in theme.conf:" >&2
       grep -vE "^\s*$|^\s*#|^\s*(''${ALLOWED})\b" "$out/theme.conf" >&2
       exit 1
@@ -106,13 +111,15 @@ stdenvNoCC.mkDerivation {
     fi
 
     # SECURITY 8: reject path traversal in directive values (forward and backslash)
-    if grep -E '\.\.[\\/]' "$out/theme.conf" | grep -q .; then
+    pathTraversalMatches=$(grep -E '\.\.[\\/]' "$out/theme.conf" || true)
+    if grep -q . <<<"$pathTraversalMatches"; then
       echo "SECURITY: path traversal in directive value" >&2
       exit 1
     fi
 
     # SECURITY 9: reject absolute paths in directive values (ESP-relative escape)
-    if grep -E '^\s*(banner|icons_dir|selection_big|selection_small|font)\s+/' "$out/theme.conf" | grep -q .; then
+    absolutePathDirectives=$(grep -E '^\s*(banner|icons_dir|selection_big|selection_small|font)\s+/' "$out/theme.conf" || true)
+    if grep -q . <<<"$absolutePathDirectives"; then
       echo "SECURITY: absolute path in directive value" >&2
       exit 1
     fi
@@ -163,14 +170,16 @@ stdenvNoCC.mkDerivation {
 
     # SECURITY 11: fonts/ extension whitelist — only .png allowed
     if [ -d "$out/fonts" ]; then
-      if find "$out/fonts" -type f ! -name '*.png' | grep -q .; then
+      fontNonPngFiles=$(find "$out/fonts" -type f ! -name '*.png' || true)
+      if grep -q . <<<"$fontNonPngFiles"; then
         echo "SECURITY: non-PNG file in fonts/" >&2
         exit 1
       fi
     fi
 
     # SECURITY 12: reject JPEG/ICNS (no dimension validation — use PNG instead)
-    if find $out \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.icns' \) -type f | grep -q .; then
+    jpegIcnsFiles=$(find $out \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.icns' \) -type f || true)
+    if grep -q . <<<"$jpegIcnsFiles"; then
       echo "SECURITY: JPEG/ICNS not allowed in themes (convert to PNG)" >&2
       exit 1
     fi
