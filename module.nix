@@ -197,7 +197,7 @@ in
     efiInstallAsRemovable = lib.mkEnableOption null // {
       default = !efi.canTouchEfiVariables;
       defaultText = lib.literalExpression "!config.boot.loader.efi.canTouchEfiVariables";
-      description = "Install to EFI/BOOT/bootx64.efi. Required when NVRAM writes fail.";
+      description = "Install to EFI/BOOT/bootx64.efi. Required when NVRAM writes fail. With `allowCoexistWithSystemdBoot`, systemd-boot is made graceful (mkDefault), because bootctl reports rEFInd at that path as another boot loader and a non-graceful update aborts on every systemd-boot version change.";
     };
 
     theme = lib.mkOption {
@@ -657,6 +657,7 @@ in
         boot.loader.systemd-boot.extraInstallCommands = ''
           ${refindInstaller} "$@"
         '';
+        boot.loader.systemd-boot.graceful = lib.mkIf cfg.efiInstallAsRemovable (lib.mkDefault true);
       })
 
       # External-installer coexistence: `boot.loader.external.installHook`

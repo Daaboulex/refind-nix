@@ -290,6 +290,32 @@
                   touch $out
                 '';
 
+            eval-sdboot-graceful-only-at-fallback-path =
+              let
+                gracefulWith =
+                  removable:
+                  nixpkgs.lib.boolToString
+                    (mkTest [
+                      minimalBase
+                      {
+                        boot.loader.systemd-boot.enable = true;
+                        boot.loader.refind.allowCoexistWithSystemdBoot = true;
+                        boot.loader.refind.efiInstallAsRemovable = removable;
+                        boot.loader.efi.canTouchEfiVariables = nixpkgs.lib.mkForce (!removable);
+                      }
+                    ]).config.boot.loader.systemd-boot.graceful;
+              in
+              pkgs.runCommand "eval-sdboot-graceful-only-at-fallback-path"
+                {
+                  atFallback = gracefulWith true;
+                  withNvram = gracefulWith false;
+                }
+                ''
+                  [ "$atFallback" = true ] || { echo "FAIL: rEFInd at the fallback path left systemd-boot non-graceful, so bootctl's ESRCH aborts the switch on the next systemd-boot update"; exit 1; }
+                  [ "$withNvram" = false ] || { echo "FAIL: systemd-boot made graceful although rEFInd does not occupy the fallback path"; exit 1; }
+                  touch $out
+                '';
+
             assert-rejects-external-coexist-without-external =
               let
                 testSystem = mkTest [
