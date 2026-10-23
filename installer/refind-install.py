@@ -450,10 +450,13 @@ def validate_theme(theme_dir: str) -> None:
                 raise RuntimeError(f"theme contains JPEG/ICNS (use PNG): {full}")
             try:
                 with open(full, "rb") as fh:
-                    if fh.read(2) == b"MZ":
-                        raise RuntimeError(f"theme contains PE binary: {full}")
-            except OSError:
-                pass
+                    head = fh.read(2)
+            except OSError as e:
+                raise RuntimeError(
+                    f"theme file unreadable, cannot check for PE binary: {full}"
+                ) from e
+            if head == b"MZ":
+                raise RuntimeError(f"theme contains PE binary: {full}")
             if os.path.getsize(full) > 5 * 1024 * 1024:
                 raise RuntimeError(f"theme file exceeds 5MB: {full}")
 

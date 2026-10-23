@@ -583,6 +583,20 @@
                   if not os.path.exists(os.path.join(leftovers, "themes", "active")):
                       failures.append("a directory that still holds files was pruned")
 
+                  sealed = os.path.join(root, "sealed-theme")
+                  os.makedirs(sealed)
+                  sealed_file = os.path.join(sealed, "background.png")
+                  with open(sealed_file, "wb") as handle:
+                      handle.write(b"\x89PNG")
+                  os.chmod(sealed_file, 0)
+                  try:
+                      mod.validate_theme(sealed)
+                      failures.append("an unreadable theme file passed validation unchecked")
+                  except RuntimeError as e:
+                      if "unreadable" not in str(e):
+                          failures.append("an unreadable theme file was refused for the wrong reason: " + str(e))
+                  os.chmod(sealed_file, 0o644)
+
                   if failures:
                       print(both)
                       print(shared_text)
