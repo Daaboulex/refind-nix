@@ -6,23 +6,23 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 <!-- END generated:badges -->
 
-Declarative rEFInd bootloader for NixOS — typed options, first-class theming, security validation.
+Declarative rEFInd bootloader for NixOS with typed options, themes as Nix derivations and security validation.
 
 <!-- BEGIN generated:upstream -->
 ## Upstream
 
 | | |
 |---|---|
-| **Project** | Original code (no upstream) |
-| **License** | N/A |
-| **Tracked** | N/A |
+| **Project** | Extends the nixpkgs rEFInd installer (`nixos/modules/system/boot/loader/refind/refind-install.py`), installs `pkgs.refind`, and packages the themes [EvanPurkhiser/rEFInd-minimal](https://github.com/EvanPurkhiser/rEFInd-minimal) and [bobafetthotmail/refind-theme-regular](https://github.com/bobafetthotmail/refind-theme-regular) |
+| **License** | See [License](#license) |
+| **Tracked** | Nothing is tracked. The two themes are pinned to fixed revisions |
 
 <!-- END generated:upstream -->
 
 ## Features
 
 - **Typed NixOS options** for `refind.conf` directives (no raw `extraConfig` needed)
-- **First-class theme support** — themes as Nix store derivations with `mkRefindTheme`
+- **Themes** as Nix store derivations with `mkRefindTheme`
 - **12 security checks** — PE binary detection, image dimension limits, directive whitelist, symlink rejection, and more
 - **Typed multi-boot entries** — `extraEntries` submodule for Windows, macOS, Linux
 - **Bug fixes** — nixpkgs #452075 (efiRemovable path), #453812 (default_selection override)
@@ -113,12 +113,6 @@ boot.loader.refind.extraEntries = [
     loader = "\\EFI\\Microsoft\\Boot\\bootmgfw.efi";
     ostype = "Windows";
   }
-  {
-    name = "macOS";
-    loader = "\\EFI\\Apple\\Boot\\bootmgfw.efi";
-    ostype = "MacOS";
-    volume = "MacOS";
-  }
 ];
 ```
 
@@ -146,31 +140,7 @@ overridden by `hideUI`. Those two options are the module's to set.
 
 ## Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enable` | bool | false | Enable rEFInd boot manager |
-| `package` | package | pkgs.refind | rEFInd package |
-| `timeout` | int | 10 | Boot timeout in seconds |
-| `maxGenerations` | positive int/null | 50 | Max generations in menu (null = unlimited) |
-| `defaultSelection` | str/null | null | Default boot entry |
-| `efiInstallAsRemovable` | bool | !canTouchEfiVariables | Install to fallback EFI path (recommended for Mac) |
-| `theme` | path/null | null | Theme directory (Nix store path) |
-| `resolution` | str/null | null | Screen resolution (e.g. "1920x1080" or "max") |
-| `hideUI` | list of enum | [] | UI elements to hide |
-| `showTools` | list of enum | [shutdown reboot firmware] | Second-row tools |
-| `bannerScale` | enum/null | null | Banner scaling (null = theme default) |
-| `textOnly` | bool | false | Text-only mode |
-| `scanfor` | list of enum | [] | Boot entry types to scan for |
-| `dontScanDirs` | list of str | [EFI/nixos ...] | Dirs to exclude from scanning |
-| `extraDontScanDirs` | list of str | [] | Dirs appended to `dontScanDirs`, keeping its default |
-| `shareSystemdBootKernels` | bool | false | Reuse systemd-boot's kernels in `/EFI/nixos` instead of copying |
-| `useGraphicsFor` | list of enum | [] | OS types to boot in graphics mode |
-| `enableMouse` | bool | false | Enable mouse support |
-| `enableTouch` | bool | false | Enable touchscreen support |
-| `graceful` | bool | false | Don't fail if ESP not mounted |
-| `extraEntries` | list of submodule | [] | Manual boot entries (Windows, macOS, etc.) |
-| `extraConfig` | lines | "" | Raw config lines (bypasses validation) |
-| `additionalFiles` | attrsOf path | {} | Extra files for ESP |
+Every option under `boot.loader.refind` is declared in [module.nix](module.nix) with its type, default and description.
 
 <!-- BEGIN generated:options -->
 <!-- END generated:options -->
@@ -201,7 +171,7 @@ Runtime validation runs during `nixos-rebuild switch` for themes not built with 
 
 ## License
 
-MIT
+The packaging in this repository is MIT, see [LICENSE](LICENSE). `refind-theme-regular` declares GPL-3.0-only. `refind-theme-minimal` declares no licence and takes the `mkRefindTheme` default, MIT. rEFInd itself comes from nixpkgs, which declares it GPL-3.0-or-later.
 
 <!-- BEGIN generated:footer -->
 <!-- END generated:footer -->
