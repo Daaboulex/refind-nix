@@ -53,7 +53,7 @@ let
           graphics
           disabled
           ;
-        icon = if e.icon != null then toString e.icon else null;
+        icon = if e.icon != null then "${e.icon}" else null;
         subEntries = map (s: {
           inherit (s)
             name
@@ -61,11 +61,9 @@ let
             initrd
             options
             volume
-            ostype
             graphics
             disabled
             ;
-          icon = if s.icon != null then toString s.icon else null;
         }) e.subEntries;
       }) cfg.extraEntries;
       inherit (cfg) additionalFiles;
@@ -428,26 +426,10 @@ in
                       default = null;
                       description = "Options string for this submenu entry. null = omit.";
                     };
-                    icon = lib.mkOption {
-                      type = lib.types.nullOr lib.types.path;
-                      default = null;
-                      description = "Icon path for this submenu entry. null = omit.";
-                    };
                     volume = lib.mkOption {
                       type = lib.types.nullOr (lib.types.strMatching "[^\n\r]+");
                       default = null;
                       description = "Volume for this submenu entry. null = omit.";
-                    };
-                    ostype = lib.mkOption {
-                      type = lib.types.nullOr (
-                        lib.types.enum [
-                          "Linux"
-                          "Windows"
-                          "MacOS"
-                        ]
-                      );
-                      default = null;
-                      description = "OS type for this submenu entry. null = omit.";
                     };
                     graphics = lib.mkOption {
                       type = lib.types.nullOr lib.types.bool;
@@ -475,7 +457,7 @@ in
           {
             name = "Windows";
             loader = "\\EFI\\Microsoft\\Boot\\bootmgfw.efi";
-            icon = "\\EFI\\refind\\icons\\os_win.png";
+            icon = ./os_win.png;
             ostype = "Windows";
           }
         ]

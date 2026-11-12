@@ -129,7 +129,7 @@ Example:
   {
     name = "Windows";
     loader = "\\EFI\\Microsoft\\Boot\\bootmgfw.efi";
-    icon = "\\EFI\\refind\\icons\\os_win.png";
+    icon = ./os_win.png;
     ostype = "Windows";
   }
 ]
@@ -201,12 +201,6 @@ Graphics mode override for this submenu entry. null = omit.
 
 Type: `null or boolean`. Default: `null`.
 
-### `boot.loader.refind.extraEntries.*.subEntries.*.icon`
-
-Icon path for this submenu entry. null = omit.
-
-Type: `null or absolute path`. Default: `null`.
-
 ### `boot.loader.refind.extraEntries.*.subEntries.*.initrd`
 
 initrd path for this submenu entry. null = omit.
@@ -230,12 +224,6 @@ Type: `string matching the pattern [^\n\r]+`.
 Options string for this submenu entry. null = omit.
 
 Type: `null or string matching the pattern [^\n\r]+`. Default: `null`.
-
-### `boot.loader.refind.extraEntries.*.subEntries.*.ostype`
-
-OS type for this submenu entry. null = omit.
-
-Type: `null or one of "Linux", "Windows", "MacOS"`. Default: `null`.
 
 ### `boot.loader.refind.extraEntries.*.subEntries.*.volume`
 

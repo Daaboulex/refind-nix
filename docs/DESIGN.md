@@ -21,7 +21,8 @@ What it adds:
 - Typed multi-boot entries: the `extraEntries` submodule, for Windows, macOS
   and Linux. Each entry supports `name`, `loader`, `initrd`, `options`, `icon`,
   `volume`, `ostype`, `graphics`, `disabled` and nested `subEntries`. A
-  sub-entry is written with its `name`, `loader`, `initrd` and `options` only.
+  sub-entry takes `name`, `loader`, `volume`, `graphics`, `initrd`, `options`
+  and `disabled`, the keywords rEFInd's parser reads inside a `submenuentry`.
 - Two bug fixes, nixpkgs #452075 and #453812, described below.
 - Safe ESP management: fsync and directory fsync, atomic writes, orphan file
   cleanup and file locking.
@@ -45,9 +46,9 @@ nixpkgs #453812 concerns the `default_selection` override. Here
 ## Writing to the ESP
 
 The installer takes an exclusive lock, `.refind-install.lock` at the root of
-the ESP, so two installs cannot run at once. Kernels, initrds, the rEFInd
-binary and additional files are copied to a `.tmp` name, synced, renamed into
-place, and their directory synced. `refind.conf` is written the same way. A
+the ESP, so two installs cannot run at once. Kernels, initrds, entry icons, the
+rEFInd binary and additional files are copied to a `.tmp` name, synced, renamed
+into place, and their directory synced. `refind.conf` is written the same way. A
 theme is copied beside the active one and swapped in by rename. At the end the
 whole ESP filesystem is synced.
 
@@ -61,6 +62,10 @@ rEFInd resolves a menu entry's path from the root of the volume, never from its
 own directory. So every generated `loader` and `initrd` path is written from
 the ESP root, and the installer checks that each one names an existing file
 before it writes `refind.conf`.
+
+An `extraEntries` icon in the Nix store is copied to `icons/` in rEFInd's
+directory, under a name made from its whole store path, and the entry names
+that copy from the ESP root. Any other icon path is written as given.
 
 `refind.conf` must be ASCII. rEFInd widens the bytes of its config straight to
 UTF-16, so anything else would render as garbage, and the installer refuses it.

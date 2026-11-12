@@ -121,8 +121,8 @@ those two are set through `hideUI` and `showTools`.
   200 MB) to the ESP. With NVIDIA drivers the initrd is about 192 MB, so a
   500 MB ESP holds only 2 or 3 generations. Set `maxGenerations` accordingly.
 - `extraConfig` bypasses all validation. Use it only for what no option covers.
-- A sub-entry of `extraEntries` writes only its `name`, `loader`, `initrd` and
-  `options`. Its `icon`, `volume`, `ostype` and `graphics` are ignored.
+- A sub-entry of `extraEntries` has no icon and no OS type of its own: rEFInd
+  reads neither inside a submenu entry.
 
 ## When something does not work
 

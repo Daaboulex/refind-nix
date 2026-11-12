@@ -180,6 +180,15 @@ def get_kernel_dest_path(kernel_path: str) -> str:
     return os.path.join(refind_dir, "kernels", f"{package_id}-{suffix}")
 
 
+def get_icon_uri(icon: str) -> str:
+    relative = os.path.relpath(icon, str(config("storeDir")))
+    if relative.startswith(os.pardir):
+        return icon
+    dest_path = os.path.join(refind_dir, "icons", relative.replace(os.sep, "-"))
+    copy_file(icon, dest_path)
+    return esp_uri(dest_path)
+
+
 @dataclass
 class BootSpec:
     system: str
@@ -296,7 +305,7 @@ def generate_extra_entries() -> str:
         if entry.get("volume"):
             result += f"  volume {sanitize_refind_value(entry['volume'])}\n"
         if entry.get("icon"):
-            result += f"  icon {sanitize_refind_value(entry['icon'])}\n"
+            result += f"  icon {sanitize_refind_value(get_icon_uri(entry['icon']))}\n"
         if entry.get("ostype"):
             result += f"  ostype {sanitize_refind_value(entry['ostype'])}\n"
         if entry.get("graphics") is not None:
@@ -312,6 +321,10 @@ def generate_extra_entries() -> str:
             result += f'  submenuentry "{sub_name}" {{\n'
             if sub.get("loader"):
                 result += f"    loader {sanitize_refind_value(sub['loader'])}\n"
+            if sub.get("volume"):
+                result += f"    volume {sanitize_refind_value(sub['volume'])}\n"
+            if sub.get("graphics") is not None:
+                result += f"    graphics {'on' if sub['graphics'] else 'off'}\n"
             if sub.get("initrd"):
                 result += f"    initrd {sanitize_refind_value(sub['initrd'])}\n"
             if sub.get("options"):

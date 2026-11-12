@@ -163,6 +163,7 @@
                       {
                         name = "Windows";
                         loader = ''\\EFI\\Microsoft\\Boot\\bootmgfw.efi'';
+                        icon = ./LICENSE;
                         ostype = "Windows";
                         subEntries = [
                           {
@@ -177,10 +178,16 @@
                 ];
                 entryCount = builtins.toJSON (builtins.length testSystem.config.boot.loader.refind.extraEntries);
               in
-              pkgs.runCommand "eval-extra-entries" { inherit entryCount; } ''
-                [[ "$entryCount" == "1" ]] || { echo "FAIL: expected 1 entry, got $entryCount"; exit 1; }
-                touch $out
-              '';
+              pkgs.runCommand "eval-extra-entries"
+                {
+                  inherit entryCount;
+                  json = installerConfigOf testSystem "extra-entries-install-json";
+                }
+                ''
+                  [[ "$entryCount" == "1" ]] || { echo "FAIL: expected 1 entry, got $entryCount"; exit 1; }
+                  grep -qE '"icon":"/nix/store/[a-z0-9]{32}-LICENSE"' "$json" || { echo "FAIL: a path icon reached the installer without a store path of its own, so nothing keeps the file for a later install"; cat "$json"; exit 1; }
+                  touch $out
+                '';
 
             assert-rejects-systemd-boot =
               let
@@ -539,6 +546,52 @@
                       failures.append("the specialisation wrapper has no top-level loader")
                   if "options " not in head:
                       failures.append("the specialisation wrapper has no top-level options")
+
+                  store_icon = fake_store_file("cccc-icons", "os_win.png")
+                  esp_icon = "/EFI/other/os_other.png"
+                  mod.install_config["extraEntries"] = [
+                      {"name": "Windows", "loader": "/EFI/Microsoft/Boot/bootmgfw.efi", "icon": store_icon},
+                      {"name": "Other", "loader": "/EFI/other/other.efi", "icon": esp_icon},
+                  ]
+                  extra_text = mod.generate_extra_entries()
+                  icons = [
+                      line.strip()[len("icon ") :]
+                      for line in extra_text.splitlines()
+                      if line.strip().startswith("icon ")
+                  ]
+                  if len(icons) != 2:
+                      failures.append("expected one icon line per entry, got: " + repr(icons))
+                  else:
+                      copied_icon = os.path.join(esp, icons[0].lstrip("/"))
+                      if not icons[0].startswith("/efi/boot/icons/"):
+                          failures.append("a store icon is not named from rEFInd's directory on the ESP: " + icons[0])
+                      elif not os.path.isfile(copied_icon):
+                          failures.append("a store icon was not copied to the ESP: " + copied_icon)
+                      elif open(copied_icon, "rb").read() != open(store_icon, "rb").read():
+                          failures.append("the icon copied to the ESP differs from its source")
+                      elif mod.paths.get(copied_icon) is not True:
+                          failures.append("the copied icon is not registered, so the sweep would delete it")
+                      if icons[1] != esp_icon:
+                          failures.append("an icon outside the store was rewritten: " + icons[1])
+
+                  mod.install_config["extraEntries"] = [
+                      {
+                          "name": "Windows",
+                          "loader": "/EFI/Microsoft/Boot/bootmgfw.efi",
+                          "subEntries": [
+                              {"name": "Text mode", "loader": "/EFI/x.efi", "volume": "WIN", "graphics": False},
+                              {"name": "Plain", "loader": "/EFI/y.efi"},
+                          ],
+                      },
+                  ]
+                  subs = mod.generate_extra_entries().split("submenuentry")[1:]
+                  if len(subs) != 2:
+                      failures.append("expected two submenu entries, got " + str(len(subs)))
+                  else:
+                      if "    volume WIN\n" not in subs[0] or "    graphics off\n" not in subs[0]:
+                          failures.append("a submenu entry lost its volume or its graphics setting: " + subs[0])
+                      if "volume" in subs[1] or "graphics" in subs[1]:
+                          failures.append("a submenu entry that sets neither got a volume or graphics line: " + subs[1])
 
                   # sharing systemd-boot's copies must point into its directory
                   # and must not leave a second copy behind
