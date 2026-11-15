@@ -44,7 +44,7 @@
         { system, pkgs, ... }:
         let
           themePkgs = pkgs.extend self.overlays.default;
-          throws = x: !(builtins.tryEval (builtins.seq x x)).success;
+          throws = system: !(builtins.tryEval system.drvPath).success;
           mkTest =
             modules:
             nixpkgs.lib.nixosSystem {
